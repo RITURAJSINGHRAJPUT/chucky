@@ -1,0 +1,1387 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Capiche · Menu Editor</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=EB+Garamond:ital,wght@0,400;0,500;0,600;1,400&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<style>
+:root{
+  --ink:#0E0D0B;--panel:#161410;--card:#1E1B15;--card2:#242017;
+  --cream:#F4ECDD;--cream-dim:#CFC6B4;--muted:#8F8676;
+  --line:rgba(244,236,221,.10);--line2:rgba(244,236,221,.17);
+  --red:#FF2A1A;--aiko:#FF2A1A;--aiko-soft:rgba(255,42,26,.13);--aiko-line:rgba(255,42,26,.42);
+  --ok:#5FB07C;--warn:#E0912B;--bad:#E5675E;
+  --paper:#F6EFE2;
+  --serif:'Lora',Georgia,serif;--mono:'DM Mono',ui-monospace,Menlo,Consolas,monospace;
+}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{margin:0;background:var(--ink);color:var(--cream);font-family:var(--mono);font-size:14px;line-height:1.45;-webkit-font-smoothing:antialiased;overflow:hidden}
+button{font:inherit;color:inherit;background:none;border:none;cursor:pointer}
+::selection{background:var(--aiko);color:#1a1400}
+#boot{position:fixed;inset:0;z-index:100;background:var(--ink);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px}
+#boot svg{color:var(--aiko)!important;fill:var(--aiko)!important}
+#boot .s{color:var(--muted);font-family:var(--mono);font-size:13px;letter-spacing:.4px}
+.spin{width:26px;height:26px;border:3px solid var(--line2);border-top-color:var(--aiko);border-radius:50%;animation:sp .8s linear infinite}
+@keyframes sp{to{transform:rotate(360deg)}}
+
+/* ---- top bar ---- */
+header.bar{display:flex;align-items:center;gap:16px;padding:10px 18px;border-bottom:1px solid var(--line);background:linear-gradient(180deg,#141209,#100E09);position:relative;z-index:20}
+.home{width:34px;height:34px;flex:none;display:grid;place-items:center;border-radius:8px;color:var(--muted);border:1px solid var(--line2);font-size:15px;text-decoration:none}
+.home:hover{color:var(--cream);border-color:var(--aiko-line)}
+.brand{display:flex;align-items:center;gap:11px}
+.brand .wm{height:30px;width:auto;color:var(--aiko)}
+.brand .tag{font-size:10.5px;color:var(--muted);letter-spacing:.2em;text-transform:uppercase}
+.homelink{display:flex;align-items:center;gap:6px;text-decoration:none;color:var(--muted);margin-right:2px}
+.homelink:hover{color:var(--cream)}
+.homelink:hover .chucky{transform:translateY(-2px)}
+.homelink .chucky{width:30px;height:30px;color:var(--aiko);transition:transform .2s}
+.homelink .bhint{font-size:14px}
+.homelink .ctag{display:none}
+.search{flex:1;max-width:340px;display:flex;align-items:center;gap:8px;background:#100E09;border:1px solid var(--line2);border-radius:9px;padding:7px 11px;transition:.15s}
+.search:focus-within{border-color:var(--aiko-line)}
+.search svg{width:15px;height:15px;color:var(--muted);flex:none}
+.search input{flex:1;background:none;border:none;outline:none;color:var(--cream);font-family:var(--mono);font-size:13px}
+.search input::placeholder{color:var(--muted)}
+.search kbd{font-family:var(--mono);font-size:10px;color:var(--muted);border:1px solid var(--line2);border-radius:4px;padding:1px 5px;background:#0d0b07}
+.spacer{flex:1}
+.pill{font-size:12px;font-weight:600;letter-spacing:.02em;padding:6px 12px;border-radius:999px;border:1px solid;display:inline-flex;align-items:center;gap:7px;font-family:var(--mono)}
+.pill::before{content:"";width:7px;height:7px;border-radius:50%;background:currentColor}
+.pill.ok{color:var(--ok);border-color:rgba(95,176,124,.4);background:rgba(95,176,124,.08)}
+.pill.bad{color:var(--bad);border-color:rgba(229,103,94,.45);background:rgba(229,103,94,.1)}
+#persona{background:transparent;color:var(--cream,#F4ECDD);border:1px solid var(--line2,rgba(244,236,221,.2));font-weight:600;letter-spacing:.02em;padding:9px 14px;border-radius:9px;font-size:13px;transition:.15s;margin-right:8px}
+#persona:hover,#persona.on{border-color:var(--aiko);color:var(--aiko)}
+.persov{position:fixed;inset:0;background:rgba(6,5,3,.74);backdrop-filter:blur(3px);display:flex;align-items:center;justify-content:center;z-index:130;padding:20px}
+.perscard{background:var(--panel,#17150f);border:1px solid var(--line2,rgba(244,236,221,.2));border-radius:16px;padding:20px;width:min(400px,92vw);box-shadow:0 30px 80px rgba(0,0,0,.6)}
+.pershd{font-size:14px;color:var(--cream,#F4ECDD);margin-bottom:16px;display:flex;flex-direction:column;gap:3px}
+.pershd span{font-size:11px;color:var(--muted,#8F8676);font-weight:400}
+.perslbl{display:block;font-size:10.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--muted,#8F8676);margin:12px 2px 6px}
+.perssel,.persocc,.persguest{width:100%;box-sizing:border-box;background:#100e09;border:1px solid var(--line2,rgba(244,236,221,.2));border-radius:9px;color:var(--cream,#F4ECDD);font-family:var(--mono,ui-monospace,monospace);font-size:14px;padding:10px 12px;outline:none;margin-bottom:2px}
+.persocc,.persguest{text-transform:uppercase;font-weight:700;letter-spacing:.4px;margin-top:8px}
+.perssel:focus,.persocc:focus,.persguest:focus{border-color:var(--aiko)}
+.persfoot{display:flex;justify-content:flex-end;gap:9px;margin-top:18px}
+.cropbtn{font:inherit;font-size:12.5px;color:var(--cream-dim,#CFC6B4);background:transparent;border:1px solid var(--line2,rgba(244,236,221,.2));border-radius:8px;padding:9px 16px;cursor:pointer;transition:.13s}
+.cropbtn:hover{border-color:var(--aiko);color:var(--cream,#F4ECDD)}
+.cropbtn.save{background:var(--aiko);color:#1a1400;border-color:var(--aiko);font-weight:700}
+.cropbtn.ghost{color:var(--muted,#8F8676)}
+#export{background:var(--aiko);color:#1a1400;font-weight:700;letter-spacing:.03em;padding:9px 16px;border-radius:9px;font-size:13px;transition:.15s}
+#export:hover{filter:brightness(1.07);transform:translateY(-1px)}
+#export:disabled{opacity:.4;cursor:not-allowed;transform:none;filter:none}
+.prevtoggle{display:none;align-items:center;gap:7px;font-size:12.5px;color:var(--cream-dim);border:1px solid var(--line2);border-radius:9px;padding:8px 13px}
+.prevtoggle:hover{border-color:var(--aiko-line);color:var(--cream)}
+
+/* ---- layout ---- */
+main.app{display:grid;grid-template-columns:210px 1fr minmax(400px,560px);height:calc(100dvh - 55px)}
+.rail{border-right:1px solid var(--line);background:var(--panel);padding:14px 12px;overflow-y:auto;display:flex;flex-direction:column;gap:3px}
+.rail .tabs{display:flex;gap:4px;background:#100E09;border:1px solid var(--line2);border-radius:9px;padding:3px;margin-bottom:12px}
+.rail .tabs button{flex:1;font-size:12px;color:var(--muted);padding:6px 8px;border-radius:6px;transition:.13s}
+.rail .tabs button.on{background:var(--aiko-soft);color:var(--cream)}
+.rail .lbl2{font-size:10px;letter-spacing:.2em;text-transform:uppercase;color:var(--muted);padding:2px 10px 8px}
+.sec{display:flex;align-items:center;justify-content:space-between;gap:8px;width:100%;text-align:left;padding:9px 11px;border-radius:8px;color:var(--cream-dim);font-size:12.5px;letter-spacing:.02em;transition:.13s;position:relative}
+.sec:hover{background:rgba(255,255,255,.035);color:var(--cream)}
+.sec.on{background:var(--aiko-soft);color:var(--cream)}
+.sec.on::before{content:"";position:absolute;left:0;top:8px;bottom:8px;width:2.5px;border-radius:2px;background:var(--aiko)}
+.sec .ct{font-size:11px;color:var(--muted);font-variant-numeric:tabular-nums;background:#0d0b07;border:1px solid var(--line);border-radius:20px;padding:1px 8px;min-width:24px;text-align:center}
+.sec.on .ct{color:var(--aiko);border-color:var(--aiko-line)}
+
+#editor{overflow-y:auto;padding:20px 24px 70px}
+.grouphd{font-size:11px;letter-spacing:.18em;text-transform:uppercase;color:var(--muted);padding:14px 2px 8px;scroll-margin-top:14px}
+.grouphd.sechd{font-family:var(--serif);font-size:22px;letter-spacing:.2px;text-transform:none;color:var(--cream);border-top:1px solid var(--line);margin-top:10px;padding-top:20px;display:flex;align-items:baseline;gap:10px}
+.grouphd.sechd .n{font-size:12px;font-family:var(--mono);color:var(--muted);letter-spacing:.02em}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px 16px;margin-bottom:11px;transition:border-color .15s,box-shadow .15s}
+.card:hover{border-color:var(--line2)}
+.card:focus-within{border-color:var(--aiko-line);box-shadow:0 0 0 1px var(--aiko-line)}
+.card.haswarn{border-color:rgba(224,145,43,.5)}
+.nrow{display:flex;align-items:flex-start;gap:12px}
+.name{flex:1;min-width:0;font-family:var(--mono);font-weight:700;font-size:16px;letter-spacing:.4px;color:var(--cream);text-transform:uppercase;outline:none;border-radius:5px;padding:3px 5px;margin:-3px -5px}
+.name:focus{background:rgba(233,184,51,.09);box-shadow:inset 0 0 0 1px var(--aiko-line)}
+.prices{display:flex;gap:6px;flex:none}
+.pwrap{display:flex;align-items:center}
+.price{width:66px;background:#100E09;border:1px solid var(--line2);border-radius:7px;color:var(--cream);font-family:var(--mono);font-size:15px;font-weight:600;text-align:right;padding:6px 9px;outline:none;font-variant-numeric:tabular-nums}
+.price:focus{border-color:var(--aiko-line)}
+.price.err{border-color:var(--bad);background:#fff6f6;color:#1a1400}
+.rm{flex:none;width:30px;height:30px;border-radius:7px;color:var(--muted);display:grid;place-items:center;font-size:15px;transition:.13s}
+.rm:hover{color:var(--bad);background:rgba(229,103,94,.1)}
+.desc{font-size:12.5px;color:var(--cream-dim);margin-top:8px;outline:none;border-radius:5px;padding:4px 6px;margin-left:-6px;margin-right:-6px;line-height:1.5;max-width:58ch}
+.desc:focus{background:rgba(233,184,51,.07);box-shadow:inset 0 0 0 1px var(--aiko-line)}
+.metarow{display:flex;align-items:center;gap:10px;margin-top:10px;flex-wrap:wrap}
+.lbl{font-size:10.5px;color:var(--muted);letter-spacing:.13em;text-transform:uppercase}
+.ctr{font-size:11px;color:var(--muted);font-variant-numeric:tabular-nums}
+.ctr.over{color:var(--bad)}
+.afchk{display:inline-flex;gap:8px!important;flex-wrap:wrap;margin-top:0!important}
+.afchk label{display:inline-flex;align-items:center;gap:6px;padding:5px 11px 5px 9px;border-radius:20px;border:1px solid var(--line2);color:var(--muted);font-size:11.5px;letter-spacing:.02em;background:#100E09;cursor:pointer;transition:.13s;user-select:none}
+.afchk label:hover{color:var(--cream-dim);border-color:var(--line2)}
+.afchk label:has(input:checked){background:var(--aiko-soft);border-color:var(--aiko-line);color:var(--cream)}
+.afchk label:has(input:checked) svg{color:var(--aiko)}
+.afchk input{position:absolute;opacity:0;width:0;height:0;pointer-events:none}
+.afchk label svg{width:15px;height:15px;color:var(--muted)}
+.hint{font-size:11.5px;color:var(--warn);margin-top:8px;min-height:0}
+.markrow{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-top:10px;padding-top:9px;border-top:1px dashed var(--line)}
+.mlbl{font-size:10px;letter-spacing:.18em;text-transform:uppercase;color:var(--muted);margin-right:2px}
+.mchip{font:inherit;font-size:11.5px;display:inline-flex;align-items:center;gap:4px;padding:3px 9px;border-radius:999px;cursor:pointer;
+  background:transparent;border:1px solid var(--line2);color:var(--muted);transition:.14s;line-height:1.4;user-select:none}
+.mchip:hover{border-color:var(--cream-dim);color:var(--cream-dim)}
+.mchip.on{background:rgba(224,58,46,.16);border-color:#E03A2E;color:var(--cream)}
+.mchip.m-spicy.on{background:rgba(224,58,46,.2);border-color:#F04A2E}
+.mchip.m-new.on{background:rgba(224,58,46,.22);border-color:#E03A2E;font-weight:600}
+.hint:empty{display:none}
+.rmstrip{display:flex;align-items:center;gap:12px;padding:11px 14px;border:1px dashed var(--line2);border-radius:10px;margin-bottom:11px;color:var(--muted);font-size:13px}
+.rmname{color:var(--cream-dim);text-transform:uppercase;letter-spacing:.4px}
+.rmtag{font-size:10.5px;color:var(--bad);border:1px solid rgba(229,103,94,.4);border-radius:20px;padding:1px 8px;letter-spacing:.08em;text-transform:uppercase}
+.restore{margin-left:auto;color:var(--aiko);font-size:12px;padding:5px 12px;border:1px solid var(--aiko-line);border-radius:7px;transition:.13s}
+.restore:hover{background:var(--aiko-soft)}
+.sp{text-decoration:underline wavy rgba(229,103,94,.9);text-underline-offset:3px;cursor:pointer}
+.gl{color:var(--bad);text-decoration:underline}
+.addzone{margin-top:4px}
+.addlink,.addopen{width:100%;padding:12px;border:1.5px dashed var(--line2);border-radius:11px;color:var(--muted);font-size:13px;letter-spacing:.03em;transition:.13s;text-align:center}
+.addlink:hover,.addopen:hover{border-color:var(--aiko-line);color:var(--aiko);background:var(--aiko-soft)}
+.addform{background:var(--card2);border:1px solid var(--aiko-line);border-radius:12px;padding:14px;margin-top:8px;display:none;flex-direction:column;gap:10px}
+.addform.open{display:flex}
+.addform input,.addform textarea,.addform select{background:#100E09;border:1px solid var(--line2);border-radius:8px;color:var(--cream);font-family:var(--mono);font-size:13px;padding:8px 10px;outline:none}
+.addform input:focus,.addform textarea:focus,.addform select:focus{border-color:var(--aiko-line)}
+.addform .af-name{font-weight:700;text-transform:uppercase}
+.af-nmeta,.af-dmeta{font-size:11px;color:var(--muted)}
+.af-nmeta.bad,.af-dmeta.bad{color:var(--bad)}
+.afadd{background:var(--aiko);color:#1a1400;font-weight:700;border-radius:8px;padding:9px;transition:.15s}
+.afadd:disabled{opacity:.4;cursor:not-allowed}
+.afcancel{color:var(--muted);font-size:12px;padding:8px}
+.afchk.af-a-row{gap:8px}
+.osel,.af-sec{cursor:pointer}
+
+/* ---- preview ---- */
+#previewPane{border-left:1px solid var(--line);background:var(--panel);display:flex;flex-direction:column;overflow:hidden;position:relative}
+.plabel{display:flex;align-items:center;gap:8px;padding:13px 18px;border-bottom:1px solid var(--line);font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--muted)}
+#ptag{color:var(--cream-dim);letter-spacing:.04em;text-transform:none}
+#wrap{flex:1;overflow:auto;background:#2a2620;padding:16px;display:flex;justify-content:center;align-items:flex-start;position:relative}
+#preview{max-width:100%;height:auto;border-radius:5px;box-shadow:0 20px 50px rgba(0,0,0,.6);background:#fff}
+#busy{position:absolute;top:22px;right:22px;background:rgba(16,14,9,.9);color:var(--cream-dim);font-size:11px;padding:5px 10px;border-radius:20px;display:none}
+#busy.on{display:block}
+.prev-close{display:none;position:absolute;top:11px;right:14px;width:28px;height:28px;border-radius:7px;color:var(--muted);place-items:center;font-size:16px;z-index:2}
+.prev-close:hover{color:var(--cream);background:rgba(255,255,255,.06)}
+
+/* ---- popover (spell) ---- */
+#popover{position:absolute;display:none;z-index:80;background:var(--panel);border:1px solid var(--line2);border-radius:10px;padding:6px;box-shadow:0 16px 40px rgba(0,0,0,.5);min-width:160px}
+#popover .word{font-size:11px;color:var(--muted);padding:4px 8px}
+#popover button{display:block;width:100%;text-align:left;padding:7px 10px;border-radius:6px;color:var(--cream);font-size:13px}
+#popover button:hover{background:var(--aiko-soft)}
+#popover .ignore{color:var(--muted);font-size:12px;border-top:1px solid var(--line);margin-top:4px;padding-top:8px}
+
+/* ---- Chucky + celebrate (restyled, engine drives them) ---- */
+#chuckysay{position:fixed;left:16px;bottom:16px;z-index:60;max-width:300px;background:#100E09;color:var(--cream-dim);font-family:var(--serif);font-style:italic;font-size:13px;line-height:1.4;padding:11px 14px;border-radius:13px;border-bottom-left-radius:3px;border:1px solid var(--line2);box-shadow:0 12px 30px rgba(0,0,0,.4);display:none}
+#chuckysay.on{display:block;animation:sayin .4s cubic-bezier(.2,1.3,.4,1)}
+@keyframes sayin{0%{opacity:0;transform:translateY(8px)}100%{opacity:1;transform:translateY(0)}}
+#celebrate{position:fixed;inset:0;z-index:200;display:none;align-items:center;justify-content:center;background:rgba(10,8,4,.6);backdrop-filter:blur(3px)}
+#celebrate.on{display:flex}
+#celebrate .cbcard{background:var(--panel);border:1px solid var(--aiko-line);border-radius:20px;padding:30px 44px 34px;display:flex;flex-direction:column;align-items:center;gap:8px;box-shadow:0 30px 80px rgba(0,0,0,.6);text-align:center;animation:pop .45s cubic-bezier(.18,1.4,.4,1)}
+@keyframes pop{0%{transform:scale(.6) rotate(-8deg);opacity:0}60%{transform:scale(1.06)}100%{transform:scale(1) rotate(0);opacity:1}}
+#celebrate .cbcat{width:120px;height:120px;color:var(--aiko)}
+#celebrate .cbcat svg{width:100%;height:100%}
+#celebrate .cbline{font-family:var(--mono);font-weight:700;font-size:26px;color:var(--cream);letter-spacing:.5px}
+#celebrate .cbsub{font-size:12px;color:var(--muted)}
+
+.scrim{position:fixed;inset:0;background:rgba(8,6,3,.55);z-index:44;display:none}
+.scrim.on{display:block}
+
+@media(max-width:1120px){ main.app{grid-template-columns:190px 1fr minmax(340px,430px)} }
+/* Tablet: rail moves to a top strip; editor + preview stay side-by-side ON the page. */
+@media(max-width:980px){
+  main.app{grid-template-columns:1fr minmax(300px,400px);grid-template-rows:auto minmax(0,1fr);grid-template-areas:"rail rail" "editor preview"}
+  .rail{grid-area:rail;flex-direction:row;align-items:center;overflow-x:auto;border-right:none;border-bottom:1px solid var(--line);padding:9px 12px;gap:6px}
+  .rail .tabs{margin-bottom:0;flex:none}
+  .rail .lbl2{display:none}
+  .sec{width:auto;flex:none;white-space:nowrap;padding:7px 12px}
+  .sec.on::before{display:none}
+  #editor{grid-area:editor}
+  #previewPane{grid-area:preview}
+  .prevtoggle,.prev-close{display:none!important}
+  .search{max-width:190px}
+}
+/* Phone: stack — preview sits directly below the editor on the same scrolling page. */
+@media(max-width:640px){
+  html,body{height:auto} body{overflow:auto}
+  main.app{display:flex;flex-direction:column;height:auto}
+  #editor{overflow:visible;height:auto;padding-bottom:20px}
+  #previewPane{border-top:1px solid var(--line);height:auto}
+  #wrap{height:70vh}
+  .brand .tag{display:none}.search{max-width:150px}
+}
+@media(prefers-reduced-motion:reduce){*{animation-duration:.01s!important}}
+</style>
+</head>
+<body>
+<!-- back-to-menus is now the Chucky logo home link in the header (see Chucky UI block) -->
+
+<div id="boot"><svg viewBox="0 0 530.34 177.41" fill="var(--red)" style="height:54px;width:auto;margin-bottom:4px"><g id="Layer_1-2" data-name="Layer 1">
+    <g>
+      <g>
+        <path d="M513.92,1.93s-21.75-.9-21.75,22.2,4.3,23.95,3.81,48.21c-.28,14.15-7.2,34.8,3.72,34.81,12.26.01,29.93-66.17,30.58-80.64.65-14.52-4.14-24.58-16.36-24.58Z"/>
+        <ellipse cx="496.47" cy="126.03" rx="13.37" ry="11.57" transform="translate(-11.19 194.2) rotate(-21.89)"/>
+      </g>
+      <g>
+        <path d="M482.16,88.97c-3.3-2.13-5.27,3.08-7,5.07-5.25,6.04-13.48,9.14-21.44,8.23-4.35-.5-7.99-2.49-10-6.45,12.06-.1,31.4-6.07,34.16-20.19,2.98-15.24-7.58-23.22-21.95-22.29-12.19.8-21.33,5.26-29.79,13.36-11.52,11.03-15.26,27.89-16.15,32.86-.06.33-.54.34-.6,0-2.11-11.76,10.8-39.19-9.79-43.63-21.48-4.63-39.54,25.02-39.54,25.02,8.04-20.82,12.72-28.93,11.81-59.74-.34-11.47-8.78-18.97-18.09-20.59-9.31-1.62-9.17,14.55-9.17,14.55,0,0-1.9,34.85-6.09,51.55-3.64,14.52-8.32,23.55-25.37,28.93-12.61,3.98-17.85-2.28-18.72-7.61-1.7-10.37,9.2-19.22,17.04-13.77,7.21,5,15.53.01,16.53-8.86,2.09-18.61-21.96-11.25-28.03-7.29-20.01,13.06-17.33,34.17-26.22,33.12-2.62-.31-9.02-2.99-2.31-16.1,3.7-7.28,10.72-18.7,2.09-17.98-6.15.56-20.09,24.32-24.19,31.53-.23.4-.82.14-.73-.31,5.83-29.6-12.93-34.9-21.37-35.12-10.69-.29-19.3,7.09-21.05,8.57-.14.12-.33-.06-.27-.24,1.39-4.47-2.71-4.72-6.03-4.94-4.64-.3-7.48,2.12-11.33,12.25-5.45,14.31-9.36,26.84-10.34,30.04-.15.49-.67.75-1.17.6-8.93-2.71,5.19-28.42,6.68-38.43.32-2.14-.85-4.35-5.11-4.35-8.43,0-10.88,3.9-11.48,5.26-.07.16-.3.17-.38.01-.94-1.86-5.32-8.79-18.19-8.79-35.12,0-48.09,26.63-48.48,27.43-1.25-6.92-4.91-12.46-11.01-15.01-18.1-7.56-27.34,7.6-36.13,12.12-24.9,12.78-33.22-14.64-26.22-33.93,8.66-23.87,36.57-30.91,40.76-24.46,3.1,4.78-9.13,11.13-4.41,23.36,4.19,10.85,31.64,8.76,35.58-11.35,5.12-26.11-31.19-49.86-72.6-10.69C-12.81,57.51-9.85,138.64,46.12,136.4c24.44-.98,40.71-14.05,48.69-28.81-.03.78-.06,1.55-.08,2.3.46,32.08,41.46,35.43,62.48,7.05.36-.49,1.13-.13.98.47-3.87,15.07,9.74,16.92,17.46,3.1.19-.34.74.09.58.45-10.72,23.52-25.23,55.69-4.52,56.46,20.65.77,24.35-39.33,23.72-56.41-.02-.49.87-.93.91-.44,1.4,17.92,37.73,17.64,44.44-4.18l.57.08c.25,22.8,30.35,25.51,42.68,10.01h.4c16.78,21.31,38.63,1.65,42.77-2.03.16-.15.41.01.35.22-.92,3.06-.88,11.3,15.5,11.56,19.51.32,36.83-32.88,36.83-32.88,0,0-8.96,18.83,8.39,29.68,4.94,3.09,9.83,3.68,14.43,2.83,6.76-1.25,9.02-6.64,11.09-13.1.08-.26.44-.29.56-.04,3.22,6.85,11.97,11.97,20.37,13.21,20.37,3,31.51-11.55,40.61-26.99,1.92-3.25,6.33-11.41,7.61-14.79.64-1.7,1.01-4.01-.78-5.17ZM453.35,70.97c2.68.55,3.56,5.1,3.07,7.36-.94,4.37-8.52,4.34-11.97,4.38.27-4.9,2.41-13.07,8.9-11.74ZM145.3,78.83c-.32,4.89-4.54,10.33-11.57,11.96-4.77,1.11-7.87-1-6.89-5.55,1.03-4.79,8.09-14.42,12.99-14.42s5.73,4.06,5.47,8ZM219.95,91.53c-2.09.8-6.66.08-7.28-5.19-.9-7.63,4.25-12.78,9.09-14.69,6.32-2.49,7.26,3.59,7.28,5.93.06,8.09-5.2,12.46-9.08,13.95Z"/>
+        <path d="M284.2,36.21c0,7.97-5.54,14.75-13.66,16.78-2.14.53-12.72,3.67-14.12-6.95-.99-7.5,4.99-14.9,11.94-17.71,7.94-3.21,15.84,0,15.84,7.88Z"/>
+      </g>
+    </g>
+  </g></svg><div class="spin"></div><div class="s" id="bootmsg">Warming up the kitchen…</div></div>
+<header class="bar">
+  <div class="brand"><svg class="wm" viewBox="0 0 530.34 177.41" fill="currentColor" aria-label="Capiche"><g id="Layer_1-2" data-name="Layer 1">
+    <g>
+      <g>
+        <path d="M513.92,1.93s-21.75-.9-21.75,22.2,4.3,23.95,3.81,48.21c-.28,14.15-7.2,34.8,3.72,34.81,12.26.01,29.93-66.17,30.58-80.64.65-14.52-4.14-24.58-16.36-24.58Z"/>
+        <ellipse cx="496.47" cy="126.03" rx="13.37" ry="11.57" transform="translate(-11.19 194.2) rotate(-21.89)"/>
+      </g>
+      <g>
+        <path d="M482.16,88.97c-3.3-2.13-5.27,3.08-7,5.07-5.25,6.04-13.48,9.14-21.44,8.23-4.35-.5-7.99-2.49-10-6.45,12.06-.1,31.4-6.07,34.16-20.19,2.98-15.24-7.58-23.22-21.95-22.29-12.19.8-21.33,5.26-29.79,13.36-11.52,11.03-15.26,27.89-16.15,32.86-.06.33-.54.34-.6,0-2.11-11.76,10.8-39.19-9.79-43.63-21.48-4.63-39.54,25.02-39.54,25.02,8.04-20.82,12.72-28.93,11.81-59.74-.34-11.47-8.78-18.97-18.09-20.59-9.31-1.62-9.17,14.55-9.17,14.55,0,0-1.9,34.85-6.09,51.55-3.64,14.52-8.32,23.55-25.37,28.93-12.61,3.98-17.85-2.28-18.72-7.61-1.7-10.37,9.2-19.22,17.04-13.77,7.21,5,15.53.01,16.53-8.86,2.09-18.61-21.96-11.25-28.03-7.29-20.01,13.06-17.33,34.17-26.22,33.12-2.62-.31-9.02-2.99-2.31-16.1,3.7-7.28,10.72-18.7,2.09-17.98-6.15.56-20.09,24.32-24.19,31.53-.23.4-.82.14-.73-.31,5.83-29.6-12.93-34.9-21.37-35.12-10.69-.29-19.3,7.09-21.05,8.57-.14.12-.33-.06-.27-.24,1.39-4.47-2.71-4.72-6.03-4.94-4.64-.3-7.48,2.12-11.33,12.25-5.45,14.31-9.36,26.84-10.34,30.04-.15.49-.67.75-1.17.6-8.93-2.71,5.19-28.42,6.68-38.43.32-2.14-.85-4.35-5.11-4.35-8.43,0-10.88,3.9-11.48,5.26-.07.16-.3.17-.38.01-.94-1.86-5.32-8.79-18.19-8.79-35.12,0-48.09,26.63-48.48,27.43-1.25-6.92-4.91-12.46-11.01-15.01-18.1-7.56-27.34,7.6-36.13,12.12-24.9,12.78-33.22-14.64-26.22-33.93,8.66-23.87,36.57-30.91,40.76-24.46,3.1,4.78-9.13,11.13-4.41,23.36,4.19,10.85,31.64,8.76,35.58-11.35,5.12-26.11-31.19-49.86-72.6-10.69C-12.81,57.51-9.85,138.64,46.12,136.4c24.44-.98,40.71-14.05,48.69-28.81-.03.78-.06,1.55-.08,2.3.46,32.08,41.46,35.43,62.48,7.05.36-.49,1.13-.13.98.47-3.87,15.07,9.74,16.92,17.46,3.1.19-.34.74.09.58.45-10.72,23.52-25.23,55.69-4.52,56.46,20.65.77,24.35-39.33,23.72-56.41-.02-.49.87-.93.91-.44,1.4,17.92,37.73,17.64,44.44-4.18l.57.08c.25,22.8,30.35,25.51,42.68,10.01h.4c16.78,21.31,38.63,1.65,42.77-2.03.16-.15.41.01.35.22-.92,3.06-.88,11.3,15.5,11.56,19.51.32,36.83-32.88,36.83-32.88,0,0-8.96,18.83,8.39,29.68,4.94,3.09,9.83,3.68,14.43,2.83,6.76-1.25,9.02-6.64,11.09-13.1.08-.26.44-.29.56-.04,3.22,6.85,11.97,11.97,20.37,13.21,20.37,3,31.51-11.55,40.61-26.99,1.92-3.25,6.33-11.41,7.61-14.79.64-1.7,1.01-4.01-.78-5.17ZM453.35,70.97c2.68.55,3.56,5.1,3.07,7.36-.94,4.37-8.52,4.34-11.97,4.38.27-4.9,2.41-13.07,8.9-11.74ZM145.3,78.83c-.32,4.89-4.54,10.33-11.57,11.96-4.77,1.11-7.87-1-6.89-5.55,1.03-4.79,8.09-14.42,12.99-14.42s5.73,4.06,5.47,8ZM219.95,91.53c-2.09.8-6.66.08-7.28-5.19-.9-7.63,4.25-12.78,9.09-14.69,6.32-2.49,7.26,3.59,7.28,5.93.06,8.09-5.2,12.46-9.08,13.95Z"/>
+        <path d="M284.2,36.21c0,7.97-5.54,14.75-13.66,16.78-2.14.53-12.72,3.67-14.12-6.95-.99-7.5,4.99-14.9,11.94-17.71,7.94-3.21,15.84,0,15.84,7.88Z"/>
+      </g>
+    </g>
+  </g></svg><span class="tag">Menu Editor</span></div>
+  <label class="search"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg><input id="q" placeholder="Search items…" oninput="filterItems(this.value)"><kbd>/</kbd></label>
+  <div class="spacer"></div>
+  <span id="flagpill" class="pill ok">All clear</span>
+  <button class="prevtoggle" onclick="togglePrev()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:15px;height:15px"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M14 4v16"/></svg>Preview</button>
+  <button id="persona" title="Add an occasion + guest name to the cover">✨ Personalise</button>
+  <button id="export">Export PDF</button>
+</header>
+<main class="app">
+  <nav class="rail" id="rail">
+    <div class="tabs"><button data-pg="0" class="on">Front</button><button data-pg="1">Back</button></div>
+    <div class="lbl2">Sections</div>
+  </nav>
+  <section id="editor"></section>
+  <aside id="previewPane">
+    <div class="plabel">Live preview <span id="ptag">— Front</span><button class="prev-close" onclick="togglePrev(false)" style="margin-left:auto" aria-label="Close">✕</button></div>
+    <div id="wrap"><canvas id="preview"></canvas><div id="busy">updating…</div></div>
+  </aside>
+</main>
+<div class="scrim" id="scrim" onclick="closeDrawers()"></div>
+<div id="popover"></div>
+
+<script>
+const { PDFDocument, PDFName, PDFNumber, PDFRawStream } = PDFLib;
+pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+
+let FM, BASE, CULINARY, ALLOWED, ADV, PAGES, FIELD={}, ICONS, SECTIONS, AC;
+let BASE_LIST=[], CULINARY_LIST=[];
+const IGNORED = new Set(), MENU = new Set();
+const edits = {};
+let removed = new Set();
+let added = [];   // [{sec, name, desc, price, allergens:[], _id}]
+let markerEdits = {};   // dishId -> [marker types] override (dairy/gluten/jain/spicy/new)
+let persona = { occasion:'', guest:'' };   // personalised cover (occasion + guest name)
+// personalise-cover config for THIS menu. `del` = spans to hide when active (none for Capiche —
+// there's an empty gap under the logo). Coords are PDF points on the cover page.
+const COVER = { page:0, cx:113, adv:0.63, del:[],   // soft coral, centred on the Capiche logo/tagline block (x~113)
+  occ:{ y:472, size:13,   font:'/T1_2', color:'0.95 0.62 0.57 rg' },   // AOMonoBold, coral
+  guest:{ y:454, size:11.5, font:'/T1_2', color:'0.95 0.62 0.57 rg' } };
+function personaLine(spec, text){
+  const t=(text||'').toUpperCase(); if(!t) return '';
+  const w=t.length*COVER.adv*spec.size;
+  const x = spec.align==='right' ? (spec.right - w) : ((spec.cx!=null?spec.cx:COVER.cx) - w/2);
+  return '\nq BT '+spec.color+' '+spec.font+' 1 Tf '+spec.size+' 0 0 '+spec.size+' '+x.toFixed(2)+' '+spec.y+' Tm ('+escPdf(t)+')Tj ET Q';
+}
+// {del:[spans to remove], add:'stamp'} for a given page when personalise is active
+function personaCover(p){
+  if(p!==COVER.page || (!persona.occasion && !persona.guest)) return { del:[], add:'' };
+  return { del:(COVER.del||[]).slice(), add: personaLine(COVER.occ, persona.occasion)+personaLine(COVER.guest, persona.guest) };
+}
+const MARKER_TYPES=['dairy','gluten','jain','spicy','new'];
+const MARKER_LABEL={dairy:'Dairy',gluten:'Gluten',jain:'Jain',spicy:'Ghaslet',new:'NEW'};
+const MARKER_ICON={dairy:'🥛',gluten:'🌾',jain:'Ⓙ',spicy:'🌶️',new:'★'};
+function dishMarkers(id){ return (id in markerEdits) ? new Set(markerEdits[id]) : new Set((FIELD[id]&&FIELD[id].markers)||[]); }
+let addSeq = 0;          // field id -> new text
+let doc, pageStreams=[], pdfBytesOrig;
+let activePage = 0, lastBytes=null, pdfjsDoc=null, renderToken=0;
+
+const enc = s => new TextEncoder().encode(s);
+const escPdf = s => normTypo(s).replace(/\\/g,'\\\\').replace(/\(/g,'\\(').replace(/\)/g,'\\)');
+const fmtNum = n => { let s=(+n).toFixed(4); return s.replace(/0+$/,'').replace(/\.$/,''); };
+const normTypo = s => (s||'')
+  .replace(/[\u2018\u2019\u201A\u201B\u2032\u02B9\u02BC\u02C8\u0091\u0092\u00B4\u0060\uFF07]/g,"'")
+  .replace(/[\u201C\u201D\u201E\u201F\u2033\u0093\u0094\u00AB\u00BB\uFF02]/g,'"')
+  .replace(/[\u2010\u2011\u2012\u2013\u2014\u2015\u2212\u0096\u0097]/g,'-')
+  .replace(/[\u2026\u0085]/g,'...')
+  .replace(/[\u00A0\u2007\u2008\u2009\u200A\u200B\u202F]/g,' ');
+const esc = s => s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+
+// monospace word-wrap to <= maxlines lines of <= maxchars
+function greedyWrap(words, maxchars){
+  const lines=[]; let cur='';
+  for(const w of words){ if(!cur) cur=w; else if((cur+' '+w).length<=maxchars) cur+=' '+w; else { lines.push(cur); cur=w; } }
+  if(cur) lines.push(cur); return lines;
+}
+// descriptions: natural greedy fill (shorter text just uses fewer lines)
+function wrapDesc(text, maxchars, maxlines){
+  const words=(text||'').split(/\s+/).filter(Boolean);
+  let lines=greedyWrap(words, maxchars);
+  const overflow=lines.length>maxlines;
+  lines=lines.slice(0,maxlines); while(lines.length<maxlines) lines.push('');
+  return {lines, overflow};
+}
+// names: balance across the ORIGINAL line count so allergen icons/price stay aligned
+function wrapName(text, maxchars, maxlines){
+  const words=(text||'').split(/\s+/).filter(Boolean);
+  if(!words.length) return {lines:Array(maxlines).fill(''), overflow:false};
+  if(greedyWrap(words, maxchars).length>maxlines) return {lines:greedyWrap(words,maxchars).slice(0,maxlines), overflow:true};
+  const want=Math.min(maxlines, words.length);
+  const maxWord=Math.max.apply(null, words.map(w=>w.length));
+  let lo=maxWord, hi=maxchars, best=maxchars;
+  while(lo<=hi){ const mid=(lo+hi)>>1; if(greedyWrap(words, mid).length<=want){ best=mid; hi=mid-1; } else lo=mid+1; }
+  let lines=greedyWrap(words, best);
+  while(lines.length<maxlines) lines.push('');
+  return {lines:lines.slice(0,maxlines), overflow:false};
+}
+/* ---------- ROOMIER TEXT: descriptions use the real space below the dish, then auto-shrink ----------
+   A baked desc is ONE text block:  <font> 1 Tf  <sz> 0 0 <sz> x y Tm (l0)Tj [0 <lead> Td (l1)Tj]... ET
+   We reuse that block rather than re-stamping: extra lines are spliced into the LAST baked span as
+   `Tj / Td / (line)` pairs (the block's own trailing Tj closes the final line), and a smaller size is
+   just a Tm swap. Keeps the baked font/colour/position exactly, and rides reflow like any other span. */
+const _pgTxt={};
+function pageText(p){ if(_pgTxt[p]==null) _pgTxt[p]=new TextDecoder('latin1').decode(pageStreams[p].pristine); return _pgTxt[p]; }
+function descLead(f){          // per-em line leading (negative), read from the baked block when possible
+  if(f._lead!=null) return f._lead;
+  let lead=(typeof AC!=='undefined'&&AC&&AC.desc_leading!=null)?AC.desc_leading:-1.385;
+  if(f.line_spans&&f.line_spans.length>=2){
+    const m=pageText(f.page).slice(f.line_spans[0][1],f.line_spans[1][0]).match(/0 (-?[\d.]+) Td/);
+    if(m) lead=parseFloat(m[1]);
+  }
+  return (f._lead=lead);
+}
+function descTm(f){            // the block's Tm (so we can swap the size)
+  if(f._tm!==undefined) return f._tm;
+  const t=pageText(f.page), s0=f.line_spans[0][0];
+  const bt=t.lastIndexOf('BT',s0), st=bt>=0?bt:Math.max(0,s0-200);
+  const re=/([\d.]+) 0 0 ([\d.]+) (-?[\d.]+) (-?[\d.]+) Tm/g; let m,last=null;
+  const seg=t.slice(st,s0); while((m=re.exec(seg))) last=m;
+  f._tm=last?{s:st+last.index,e:st+last.index+last[0].length,size:parseFloat(last[1]),x:parseFloat(last[3]),y:parseFloat(last[4])}:null;
+  return f._tm;
+}
+/* Some text blocks in these menus do NOT set their own font (no `Tf`) — they inherit the font
+   left active by an EARLIER block. Deleting a span that happens to carry that `Tf` (e.g. a dish's
+   baked Jain marker) silently re-fonts every fontless block after it, which renders as missing
+   letters (only glyphs present in the inherited subset survive). So when we delete a span, we
+   leave its last `Tf` behind: same graphics state, nothing drawn. */
+function keepFont(sp, p){
+  const seg=pageText(p).slice(sp[0],sp[1]);
+  const m=seg.match(/\/[A-Za-z0-9_]+ [\d.]+ Tf/g);
+  return m? m[m.length-1]+'\n' : '';
+}
+const _divs={};
+function dividersFor(p){ if(_divs[p]==null) _divs[p]=_dividerLines(pageStreams[p].pristine); return _divs[p]; }
+function gapBelowF(f){         // usable room below: the nearer of the next field and the DIVIDER RULE
+  if(f._gap!=null) return f._gap;
+  let limit=null;   // the highest y we must stay above
+  for(const g of FM.fields){
+    if(g===f||g.page!==f.page||g.y==null) continue;
+    if(Math.abs(g.x-f.x)>60) continue;
+    if(g.y>=f.y-0.5) continue;
+    const top=g.y+(g.size||7)*0.72;      // that field's glyphs rise ABOVE its baseline
+    if(limit==null||top>limit) limit=top;
+  }
+  for(const d of dividersFor(f.page)){   // the rule between dishes is the real floor — never cross it
+    if(d.y<f.y-0.5 && d.x-8<=f.x && f.x<=d.x+d.w+8 && (limit==null||d.y>limit)) limit=d.y;
+  }
+  return (f._gap = limit!=null ? (f.y-limit) : Math.abs(descLead(f)*f.size)*(f.line_spans.length+1));
+}
+const DESC_CLEAR=1.4;          // min clearance above the rule — matches the menu's own tightest baked spacing
+function maxLinesAt(f,sz){     // how many lines actually fit at this size (never fewer than baked)
+  const B=f.line_spans.length, lh=Math.abs(descLead(f)*sz);
+  // Cap growth at +2 lines: a big empty gap (last dish in a column) shouldn't license a
+  // 9-line description, and that space can hold art/headers this map doesn't know about.
+  return Math.max(B, Math.min(B+2, 1+Math.floor((gapBelowF(f)-DESC_CLEAR)/lh)));
+}
+function fitDesc(f,val){       // use every line that fits; only then shrink the size
+  const FLOOR=+(f.size*0.72).toFixed(3);
+  let sz=f.size, mc=f.max_chars;
+  for(let i=0;i<18;i++){
+    const w=wrapDesc(val, mc, maxLinesAt(f,sz));
+    if(!w.overflow) return {lines:w.lines, size:sz, overflow:false};
+    if(sz<=FLOOR) break;
+    sz=Math.max(FLOOR,+(sz*0.94).toFixed(3));
+    mc=Math.max(4, Math.floor(f.max_chars*f.size/sz));   // smaller glyphs -> more chars in the same width
+  }
+  const w=wrapDesc(val, Math.max(4,Math.floor(f.max_chars*f.size/FLOOR)), maxLinesAt(f,FLOOR));
+  return {lines:w.lines, size:FLOOR, overflow:w.overflow};
+}
+function wrapFor(f,val){ if(f.role==='name') return wrapName(val,f.max_chars,f.lines.length); const t=fitDesc(f,val); return {lines:t.lines, overflow:t.overflow}; }
+function isOverflow(f,val){ return wrapFor(f,val).overflow; }
+
+function spliceBytes(src, ops){
+  ops = ops.slice().sort((a,b)=>a.s-b.s);
+  let outLen = src.length + ops.reduce((d,o)=>d+(o.rep.length-(o.e-o.s)),0);
+  const out=new Uint8Array(outLen); let si=0, oi=0;
+  for(const o of ops){ out.set(src.subarray(si,o.s),oi); oi+=o.s-si; out.set(o.rep,oi); oi+=o.rep.length; si=o.e; }
+  out.set(src.subarray(si),oi); return out;
+}
+
+/* ---------- structural reflow (add/remove) ---------- */
+const _WS=new Set([32,9,13,10,0,12]), _DL=new Set([40,41,60,62,91,93,123,125,47,37]);
+function _toks(b){const T=[];let i=0,n=b.length;while(i<n){const c=b[i];
+  if(_WS.has(c)){i++;continue;}
+  if(c===37){while(i<n&&b[i]!==13&&b[i]!==10)i++;continue;}
+  if(c===40){let s=i;i++;let d=0;while(i<n){const ch=b[i];if(ch===92){i+=2;continue;}if(ch===40)d++;else if(ch===41){if(d===0){i++;break;}d--;}i++;}T.push({t:1,s,e:i});continue;}
+  if(c===91||c===93||c===123||c===125){T.push({t:3,s:i,e:i+1});i++;continue;}
+  if(c===47){let s=i;i++;while(i<n&&!_WS.has(b[i])&&!_DL.has(b[i]))i++;T.push({t:2,s,e:i});continue;}
+  let s=i;while(i<n&&!_WS.has(b[i])&&!_DL.has(b[i]))i++;
+  if(i>s){const c0=b[s];const isn=(c0>=48&&c0<=57)||c0===43||c0===45||c0===46;T.push({t:isn?0:3,s,e:i});}else i++;}
+  return T;}
+function _dec(b,k){let s='';for(let i=k.s;i<k.e;i++)s+=String.fromCharCode(b[i]);return s;}
+const _nv=(b,k)=>parseFloat(_dec(b,k));
+function _anchors(b){const T=_toks(b),A=[],nb=[];const qs=[];
+  for(const k of T){if(k.t===0){nb.push(k);continue;}if(k.t===1||k.t===2){nb.length=0;continue;}
+    const op=_dec(b,k);
+    if(op==='q')qs.push(0);else if(op==='Q'){if(qs.length)qs.pop();}
+    else if(op==='cm'){const a=nb.slice(-6).map(x=>_nv(b,x));if(a.length===6&&Math.abs(a[0]-1)<1e-6&&Math.abs(a[3]-1)<1e-6&&Math.abs(a[1])<1e-9&&Math.abs(a[2])<1e-9){const ty=nb[nb.length-1];A.push({kind:'cm',x:a[4],y:a[5],s:ty.s,e:ty.e});}}
+    else if(op==='Tm'){const a=nb.slice(-6).map(x=>_nv(b,x));if(a.length===6){const ty=nb[nb.length-1];A.push({kind:'tm',x:a[4],y:a[5],s:ty.s,e:ty.e});}}
+    nb.length=0;}
+  return A;}
+function _blocks(b){const T=_toks(b),B=[],nb=[];let dep=0,qs=-1,qa=null,bs=-1,ba=null;
+  for(const k of T){if(k.t===0){nb.push(k);continue;}if(k.t===1||k.t===2){nb.length=0;continue;}
+    const op=_dec(b,k);
+    if(op==='q'){if(dep===0){qs=k.s;qa=null;}dep++;}
+    else if(op==='Q'){dep--;if(dep===0&&qs>=0){B.push({span:[qs,k.e],kind:'q',x:qa?qa[0]:null,y:qa?qa[1]:null});qs=-1;}}
+    else if(op==='cm'){const a=nb.slice(-6).map(x=>_nv(b,x));if(a.length===6&&Math.abs(a[0]-1)<1e-6&&Math.abs(a[3]-1)<1e-6&&Math.abs(a[1])<1e-9&&Math.abs(a[2])<1e-9){if(qa===null)qa=[a[4],a[5]];}}
+    else if(op==='BT'){bs=k.s;ba=null;}
+    else if(op==='Tm'){const a=nb.slice(-6).map(x=>_nv(b,x));if(a.length===6)ba=[a[4],a[5]];}
+    else if(op==='ET'){if(bs>=0){B.push({span:[bs,k.e],kind:'text',x:ba?ba[0]:null,y:ba?ba[1]:null});bs=-1;}}
+    nb.length=0;}
+  return B;}
+function _cluster(blocks,cmin,cmax,gap){gap=gap||18;
+  const bs=blocks.filter(b=>b.x!==null&&b.x>=cmin&&b.x<=cmax&&b.y!==null).sort((a,b)=>b.y-a.y);
+  const cl=[];let cur=[];for(const b of bs){if(!cur.length)cur=[b];else if(cur[cur.length-1].y-b.y<=gap)cur.push(b);else{cl.push(cur);cur=[b];}}
+  if(cur.length)cl.push(cur);return cl;}
+// columns for a page from its name x's
+function pageColumns(p){
+  const xs=[...new Set(FM.fields.filter(f=>f.page===p&&f.role==='name').map(f=>Math.round(f.x)))].sort((a,b)=>a-b);
+  const W=FM.page_sizes?FM.page_sizes[p][0]:842;
+  return xs.map((x,i)=>({x,min:x-12,max:(i<xs.length-1?xs[i+1]-12:W+20)}));
+}
+// per-page structural ops from the removed set
+let _structCache={sig:null,byPage:{}};
+function structuralForPage(p, pristine){
+  const removedHere=FM.fields.filter(f=>f.page===p&&f.role==='name'&&removed.has(f.id));
+  if(!removedHere.length) return {deletes:[],shiftOps:[],priceShift:{},skip:new Set()};
+  const blocks=_blocks(pristine), anchors=_anchors(pristine);
+  const cols=pageColumns(p);
+  const priceTm=FM.fields.filter(f=>f.page===p&&f.role==='price');
+  const deletes=[], shiftOps=[], priceShift={}, removedSlots=[]; const skip=new Set();
+  for(const col of cols){
+    const removedYs=removedHere.filter(f=>f.x>=col.min&&f.x<col.max).map(f=>f.y);
+    if(!removedYs.length) continue;
+    const colNameYs=FM.fields.filter(f=>f.page===p&&f.role==='name'&&f.x>=col.min&&f.x<col.max).map(f=>f.y);
+    const cl=_cluster(blocks,col.min,col.max);
+    const top=c=>Math.max(...c.map(b=>b.y));
+    const cidx=y=>{let bi=0,bd=1e9;cl.forEach((c,i)=>{const d=Math.min(...c.map(b=>Math.abs(b.y-y)));if(d<bd){bd=d;bi=i;}});return bi;};
+    const li=cidx(Math.min(...colNameYs));
+    const remSet=new Set(removedYs.map(cidx));
+    const slotH=i=> i<cl.length-1? top(cl[i])-top(cl[i+1]) : (i>0? top(cl[i-1])-top(cl[i]):0);
+    for(let j=0;j<cl.length;j++){
+      if(remSet.has(j)){ for(const b of cl[j]) deletes.push(b.span); removedSlots.push({cmin:col.min,cmax:col.max,y:top(cl[j]),h:slotH(j)}); continue; }
+      if(j>li) continue;
+      let d=0; for(const k of remSet){ if(k<j) d+=slotH(k); }
+      if(d<=0) continue;
+      for(const blk of cl[j]) for(const a of anchors){
+        if(!(blk.span[0]<=a.s&&a.e<=blk.span[1])) continue;
+        // if this Tm is a price Tm, defer to price handling (compose with right-align)
+        const pf=priceTm.find(pf=>a.s>=pf.tm_span[0]&&a.e<=pf.tm_span[1]);
+        if(pf){ priceShift[pf.id]=d; }
+        else shiftOps.push({s:a.s,e:a.e,rep:enc(fmtNum(a.y+d))});
+      }
+    }
+  }
+  // mark removed items' field ids to skip in text edits
+  for(const nf of removedHere){
+    skip.add(nf.id);
+    const it=FM.fields.filter(f=>f.page===p);
+    // desc/prices belonging to this name (same column, nearest below/within slot) -- match by item grouping
+  }
+  return {deletes,shiftOps,priceShift,skip,removedSlots};
+}
+
+function opsForPage(fields, priceShift, skip){
+  priceShift = priceShift||{}; 
+  const ops=[];
+  for(const f of fields){
+    if(skip && skip.has(f.id)) continue;
+    const hasEdit = (f.id in edits);
+    const yShift = (f.role==='price') ? (priceShift[f.id]||0) : 0;
+    if(!hasEdit && !yShift) continue;
+    const val = hasEdit ? edits[f.id] : f.text;
+    if(f.role==='price'){
+      if(hasEdit) ops.push({s:f.tj_span[0],e:f.tj_span[1],rep:enc('('+escPdf(val)+')')});
+      const digitChange = hasEdit && val.length!==f.text.length;
+      if(digitChange || yShift){
+        const [a,b,c,d,x,ff]=f.tm_vals, size=a, adv=ADV.price;
+        const right = x + f.text.length*adv*size;
+        const nx = right - val.length*adv*size;
+        ops.push({s:f.tm_span[0],e:f.tm_span[1],rep:enc([a,b,c,d,(digitChange?nx:x),(ff+yShift)].map(fmtNum).join(' '))});
+      }
+    } else if(f.role==='name'){
+      const {lines}=wrapName(val, f.max_chars, f.lines.length);
+      f.lines.forEach((pieces,i)=>{
+        ops.push({s:pieces[0][0],e:pieces[0][1],rep:enc('('+escPdf(lines[i]||'')+')')});
+        for(let k=1;k<pieces.length;k++) ops.push({s:pieces[k][0],e:pieces[k][1],rep:enc('()')});
+      });
+      for(const td of f.td_spans){ if(td[2]) continue; ops.push({s:td[0],e:td[1],rep:enc('0 0')}); }
+    } else if(f.role==='desc'){
+      const fit=fitDesc(f, val);
+      const B=f.line_spans.length;
+      let lines=fit.lines.slice();
+      let last=lines.length; while(last>0 && !lines[last-1]) last--;      // drop trailing blanks
+      const n=Math.max(B,last); lines=lines.slice(0,n); while(lines.length<n) lines.push('');
+      if(Math.abs(fit.size-f.size)>0.005){                                 // auto-shrink -> swap the Tm size
+        const tm=descTm(f);
+        if(tm) ops.push({s:tm.s,e:tm.e,rep:enc(fmtNum(fit.size)+' 0 0 '+fmtNum(fit.size)+' '+fmtNum(tm.x)+' '+fmtNum(tm.y)+' Tm')});
+      }
+      const lead=descLead(f);
+      f.line_spans.forEach((sp,i)=>{
+        if(i<B-1){ ops.push({s:sp[0],e:sp[1],rep:enc('('+escPdf(lines[i]||'')+')')}); return; }
+        // last baked span carries any lines beyond the baked count; the block's own Tj closes the final one
+        let rep='('+escPdf(lines[i]||'')+')';
+        for(let k=i+1;k<n;k++) rep+='Tj\n0 '+fmtNum(lead)+' Td\n('+escPdf(lines[k]||'')+')';
+        ops.push({s:sp[0],e:sp[1],rep:enc(rep)});
+      });
+    }
+  }
+  return ops;
+}
+
+// ===================== ADD-ITEM ENGINE (appends native new items) =====================
+function jFmt(v){ let s=(+v).toFixed(4).replace(/0+$/,'').replace(/\.$/,''); return s||'0'; }
+function jEsc(s){ return normTypo(s).replace(/\\/g,'\\\\').replace(/\(/g,'\\(').replace(/\)/g,'\\)'); }
+function jStamp(parts, tx, ty){
+  let out='';
+  for(const p of parts){
+    const b=p.bytes.replace(/1 0 0 1 -?[\d.]+ -?[\d.]+ cm/, '1 0 0 1 '+jFmt(tx+p.dx)+' '+jFmt(ty+p.dy)+' cm');
+    out+=p.color+' '+b+'\n';
+  }
+  return out;
+}
+// Stamp a dish's marker set at its name-baseline anchor (bx0,Yb). Mirrors the baked packing:
+// absolute per-icon offsets from add_const, so a re-stamp lands exactly where the originals were.
+function stampMarkers(bx0, Yb, set, page){
+  const C=AC, F=C.fonts, IC=C.ink_color; let out='';
+  const jf=(FM.jfont_by_page&&FM.jfont_by_page[page])||F.j;   // AOMonoBold resource name differs per page
+  const OFF={dairy:C.icon_dairy,gluten:C.icon_gluten,jain:C.icon_j,spicy:C.icon_spicy,new:C.icon_badge};
+  const spDx = set.has('jain') ? 17.79 : 12.0;   // flame packs after J when Jain present, else tighter (matches baked)
+  for(const t of MARKER_TYPES){
+    if(!set.has(t)||!OFF[t]) continue;
+    const dx = (t==='spicy') ? spDx : OFF[t][0];
+    const X=bx0+dx, Y=Yb+OFF[t][1];
+    if(t==='jain') out+='BT\n'+IC+'\n'+jf+' 1 Tf\n0 Tc 0 Tw '+C.j_size+' 0 0 '+C.j_size+' '+jFmt(X)+' '+jFmt(Y)+' Tm\n(J)Tj\nET\n';
+    else if(t==='new'){ if(ICONS.newbadge) out+=jStamp(ICONS.newbadge, X, Y).trim()+'\n'; }
+    else if(ICONS[t]) out+=jStamp(ICONS[t], X, Y).trim()+'\n';
+  }
+  return out;
+}
+function addItemHeight(it,sec){ // total vertical space this item needs (name + desc lines)
+  const dl=wrapDesc((it.desc||'').toUpperCase(), 56, 2).lines.filter(Boolean).length;
+  return Math.max(sec.slot, 24 + (dl-1)*9.0);
+}
+function buildItemJS(it, sec, Y){
+  const NX=sec.col_x, SZ=sec.name_size||13, adv=0.63*SZ;   // exact AO-Mono advance (630/1000 em)
+  const C=AC, F=C.fonts, NC=C.name_color, IC=C.ink_color;
+  const DDY=(sec.desc_dy!=null?sec.desc_dy:C.desc_dy);
+  const nm=(it.name||'').toUpperCase();
+  let p=[];
+  p.push('BT\n'+NC+'\n'+F.name+' 1 Tf\n0 Tc 0 Tw '+SZ+' 0 0 '+SZ+' '+jFmt(NX)+' '+jFmt(Y)+' Tm\n('+jEsc(nm)+')Tj\nET');
+  const dlines=wrapDesc((it.desc||'').toUpperCase(), 56, 2).lines.filter(Boolean);
+  if(dlines.length){
+    let d='BT\n'+NC+'\n'+F.desc+' 1 Tf\n0 Tw '+C.desc_size+' 0 0 '+C.desc_size+' '+jFmt(NX)+' '+jFmt(Y+DDY)+' Tm\n('+jEsc(dlines[0])+')Tj';
+    for(let i=1;i<dlines.length;i++) d+='\n0 -1.385 Td\n('+jEsc(dlines[i])+')Tj';   // 1.385 x 6.5 = 9.0pt, matches the real menu
+    d+='\nET'; p.push(d);
+  }
+  const drawPrice=(val,rightX)=>{ val=String(val||''); if(!val) return; const pw=val.length*C.adv_price*C.price_size, px=rightX-pw;
+    p.push('BT\n'+NC+'\n'+F.price+' 1 Tf\n-0.05 Tw '+C.price_size+' 0 0 '+C.price_size+' '+jFmt(px)+' '+jFmt(Y+1.89)+' Tm\n('+jEsc(val)+')Tj\nET'); };
+  drawPrice(it.price, sec.price_right);
+  if(sec.price_right_2!=null) drawPrice(it.price2, sec.price_right_2);
+  const bx=NX+nm.length*adv+1.47*SZ, al=new Set(it.allergens||[]);   // marker gap = 1.47*size (matches Summer Burrata's ratio), size-scaled & length-independent
+  // markers pack left-to-right: absent ones leave NO gap. small cluster (dairy/gluten/J) is tight; NEW badge keeps its lead gap after the cluster.
+  const DW=C.icon_gluten[0]-C.icon_dairy[0];      // dairy slot width
+  const GW=C.icon_j[0]-C.icon_gluten[0];          // gluten slot width
+  const JW=0.63*C.j_size;                         // 'J' glyph advance (mono 0.63em)
+  const BG=C.icon_badge[0]-(DW+GW+JW);            // gap from cluster-end to the NEW badge
+  let ix=bx+(C.icon_dairy[0]||0);
+  if(al.has('dairy')){  p.push(jStamp(ICONS.dairy,  ix, Y+C.icon_dairy[1]).trim());  ix+=DW; }
+  if(al.has('gluten')){ p.push(jStamp(ICONS.gluten, ix, Y+C.icon_gluten[1]).trim()); ix+=GW; }
+  if(al.has('jain')){   p.push('BT\n'+IC+'\n'+F.j+' 1 Tf\n0 Tc 0 Tw '+C.j_size+' 0 0 '+C.j_size+' '+jFmt(ix)+' '+jFmt(Y+C.icon_j[1])+' Tm\n(J)Tj\nET'); ix+=JW; }
+  if(al.has('new'))     p.push(jStamp(ICONS.newbadge, ix+BG, Y+C.icon_badge[1]).trim());
+  p.push('0.727 0.668 0.652 0.813 K\n0.464 w\nq 1 0 0 1 '+jFmt(NX)+' '+jFmt(Y+19.5)+' cm\n0 0 m\n'+jFmt(sec.divider_w)+' 0 l\nS\nQ');
+  const sz=PAGES[sec.page]||[841.89,595.276], W=sz[0], H=sz[1];
+  return '\nq\n0 '+jFmt(H)+' '+jFmt(W)+' '+jFmt(-H)+' re\nW n\n'+p.join('\n')+'\nQ\n';
+}
+function appendedForPage(p, removedSlots){
+  if(!added.length) return '';
+  let bySec={};
+  added.forEach(it=>{ const s=SECTIONS[it.sec]; if(s && s.page===p){ (bySec[it.sec]=bySec[it.sec]||[]).push(it); } });
+  let out='';
+  for(const si in bySec){
+    const sec=SECTIONS[si];
+    let shift=0;  // ride the same reflow as the section's items when something above was removed
+    for(const rs of (removedSlots||[])){ if(sec.col_x>=rs.cmin && sec.col_x<rs.cmax && rs.y>sec.last_y) shift+=Math.abs(rs.h); }
+    let cy=sec.last_y+shift;
+    let prevName=sec.last_name_lines||1, prevDesc=sec.last_desc_lines||1;
+    for(const it of bySec[si]){
+      const dist = sec.slot + (prevDesc-2)*9.0 + (prevName-1)*13.5;   // gap depends on the PREVIOUS item's height
+      cy -= dist; out += buildItemJS(it,sec,cy);
+      prevName = 1; prevDesc = wrapDesc((it.desc||'').toUpperCase(),56,2).lines.filter(Boolean).length;
+    }
+  }
+  return out;
+}
+
+
+// ---- DIVIDER ENGINE: dividers are decoupled from icon-bundling blocks and positioned by their OWN y ----
+function _dividerLines(bytes){
+  const s = new TextDecoder('latin1').decode(bytes);
+  const re = /q 1 0 0 1 (-?[\d.]+) (-?[\d.]+) cm\s+0 0 m\s+([\d.]+) 0 l\s+S\s+Q/g;
+  const out=[]; let m;
+  while((m=re.exec(s))){ out.push({x:+m[1], y:+m[2], w:+m[3], xs:m[1], ws:m[3], full:[m.index, m.index+m[0].length]}); }
+  return out;
+}
+function dividerOps(divs, removedSlots){
+  // Each divider sits just ABOVE the item it precedes (~0.4*pitch above the name top);
+  // the first item of a section has no divider above it (section header sits there).
+  // Removing an item must consume exactly ONE divider:
+  //   - normal item -> the divider directly above its top
+  //   - first item  -> the divider directly BELOW its top (above the next item), else
+  //                    that line survives and parks itself under the section header
+  // Then every surviving divider rides up by the height of each removed slot below it.
+  // NOTE: rs.h (slot height) is unreliable for the LAST item of a section (it can be
+  // grossly over-estimated), so the delete-window is derived from the column's own
+  // divider PITCH, not from rs.h. rs.h is only used for the ride-up shift, where the
+  // last-item over-estimate is harmless (nothing sits below the last item).
+  const ops=[]; if(!(removedSlots&&removedSlots.length)) return ops;
+  const killed=new Set();
+  const slots=[...removedSlots].sort((a,b)=>b.y-a.y);
+  for(const rs of slots){
+    const inCol=o=> o.d.x>=rs.cmin && o.d.x<rs.cmax;
+    const colDivs=divs.map((d,i)=>({d,i})).filter(inCol).sort((a,b)=>b.d.y-a.d.y);
+    let gaps=[]; for(let k=1;k<colDivs.length;k++) gaps.push(colDivs[k-1].d.y-colDivs[k].d.y);
+    let pitch; if(gaps.length){ gaps.sort((a,b)=>a-b); pitch=gaps[gaps.length>>1]; }
+    else pitch=Math.min(Math.abs(rs.h)||50, 80);   // single-divider column: clamp bad rs.h
+    const G=pitch*0.7;
+    // primary: divider sitting just above this item's top
+    let pick=colDivs.find(o=>!killed.has(o.i) && o.d.y>rs.y+1 && o.d.y<=rs.y+G);
+    // fallback (first item of section): the divider just below its top
+    if(!pick) pick=colDivs.find(o=>!killed.has(o.i) && o.d.y<rs.y-1 && o.d.y>=rs.y-G);
+    if(pick) killed.add(pick.i);
+  }
+  divs.forEach((d,i)=>{
+    if(killed.has(i)){ ops.push({s:d.full[0], e:d.full[1], rep:enc('')}); return; }
+    let shift=0;
+    for(const rs of removedSlots){
+      if(!(d.x>=rs.cmin && d.x<rs.cmax)) continue;
+      if(d.y <= rs.y-Math.abs(rs.h)/2) shift += Math.abs(rs.h);
+    }
+    if(shift>0) ops.push({s:d.full[0], e:d.full[1], rep:enc('q 1 0 0 1 '+d.xs+' '+fmtNum(d.y+shift)+' cm 0 0 m '+d.ws+' 0 l S Q')});
+  });
+  return ops;
+}
+
+// ---- NEW-BADGE ENGINE: Illustrator groups multiple items' NEW badges into shared art
+//      q-blocks keyed by ONE badge's position, so the coarse block reflow can't see them.
+//      Like dividers, badges are decoupled and handled by their OWN position: a removed
+//      item's badge is spliced out; a survivor's badge rides up with its item's reflow. ----
+function _badges(bytes){
+  const s=new TextDecoder('latin1').decode(bytes);
+  const partRe=/q 1 0 0 1 (-?[\d.]+) (-?[\d.]+) cm\n(?:[^Q]*?)\nf\nQ/g;   // a filled path part
+  const parts=[]; let m;
+  while((m=partRe.exec(s))){
+    const pre=s.slice(Math.max(0,m.index-40), m.index);
+    const ri=pre.search(/0 0\.988 1 0 k\s*$/);   // starburst fill is the brand red
+    parts.push({s:m.index,e:m.index+m[0].length,x:+m[1],y:+m[2],red:ri>=0,colStart:ri>=0?(m.index-pre.length+ri):m.index});
+  }
+  const out=[];
+  for(let i=0;i<parts.length;i++){
+    const p=parts[i]; if(!p.red||p.e-p.s>900) continue;               // decor blobs are big; badge starburst ~473B
+    let j=i+1,lo=p.s,hi=p.e,letters=0,prevEnd=p.e;
+    while(j<parts.length&&letters<3){                                  // the 3 'NEW' letters sit on the starburst, contiguous in the stream
+      const q=parts[j]; if(q.red) break;
+      if(q.s-prevEnd<150&&Math.abs(q.y-p.y)<9&&q.x>=p.x-32&&q.x<=p.x+40&&(q.e-q.s)<900){lo=Math.min(lo,q.s);hi=Math.max(hi,q.e);prevEnd=q.e;letters++;j++;}
+      else break;
+    }
+    if(letters>=3) out.push({span:[Math.min(p.colStart,lo),hi],x:p.x,y:p.y});
+    i=j-1;
+  }
+  return out;
+}
+function badgeOwner(b,page){ let best=null,bd=1e9;
+  for(const nf of FM.fields){ if(nf.page!==page||nf.role!=='name') continue;
+    const dy=Math.abs(nf.y-b.y),dx=b.x-nf.x; if(dx<-4||dx>270) continue;   // badge sits to the RIGHT of its name, same column
+    const d=dy+dx*0.05; if(dy<16&&d<bd){bd=d;best=nf;} }
+  return best;
+}
+function badgeOps(bytes, page, removedSlots){
+  const badges=_badges(bytes); if(!badges.length) return {ops:[],spans:[]};
+  const s=new TextDecoder('latin1').decode(bytes); const ops=[], spans=badges.map(b=>b.span);
+  for(const b of badges){
+    const owner=badgeOwner(b,page);
+    if(owner&&(owner.id in markerEdits)&&!removed.has(owner.id)) continue;   // marker engine owns this dish's badge
+    if(owner&&removed.has(owner.id)){ ops.push({s:b.span[0],e:b.span[1],rep:enc('')}); continue; }   // removed item -> delete its badge
+    let shift=0;   // survivor below a removed slot -> ride up by the removed height (same as dividers)
+    for(const rs of (removedSlots||[])){ if(b.x>=rs.cmin&&b.x<rs.cmax&&b.y<=rs.y-Math.abs(rs.h)/2) shift+=Math.abs(rs.h); }
+    if(shift>0){ const txt=s.slice(b.span[0],b.span[1]).replace(/(1 0 0 1 -?[\d.]+ )(-?[\d.]+)( cm)/g,(mm,a,y,c)=>a+fmtNum(parseFloat(y)+shift)+c); ops.push({s:b.span[0],e:b.span[1],rep:enc(txt)}); }
+  }
+  return {ops,spans};
+}
+
+async function regenerate(){
+  for(let p=0;p<pageStreams.length;p++){
+    const ps=pageStreams[p];
+    const st = structuralForPage(p, ps.pristine);
+    const skip = new Set();
+    if(removed.size){
+      const grp=itemsForPage(p);
+      for(const it of grp.items){ if(removed.has(it.name.id)){ skip.add(it.name.id); if(it.desc)skip.add(it.desc.id); for(const pr of it.prices)skip.add(pr.id);} }
+    }
+    const divs = _dividerLines(ps.pristine);
+    const bdg = badgeOps(ps.pristine, p, st.removedSlots);   // NEW badges decoupled like dividers
+    // marker overrides: delete edited dishes' baked markers + restamp their chosen set at the anchor
+    const mkDishes = FM.fields.filter(f=>f.page===p && f.role==='name' && (f.id in markerEdits) && !removed.has(f.id));
+    const mkDelSpans=[]; let mkAppend='';
+    for(const nf of mkDishes){
+      const sp=nf.markerSpans||{};
+      for(const t in sp) mkDelSpans.push(sp[t]);
+      let shift=0;   // if items were removed above, ride the anchor up with the dish
+      for(const rs of (st.removedSlots||[])){ if(nf.markerBase && nf.x>=rs.cmin && nf.x<rs.cmax && nf.markerBase[1] <= rs.y-Math.abs(rs.h)/2) shift+=Math.abs(rs.h); }
+      if(nf.markerBase) mkAppend += stampMarkers(nf.markerBase[0], nf.markerBase[1]+shift, dishMarkers(nf.id), p);
+    }
+    const inMarker=(s,e)=> mkDelSpans.some(sp=> sp[0]<=s && e<=sp[1]);
+    const inBadge = (s,e)=> bdg.spans.some(sp=> sp[0]<=s && e<=sp[1]);
+    const inDiv = (s,e)=> divs.some(d=> d.full[0]<=s && e<=d.full[1]);
+    const shiftOps = st.shiftOps.filter(o=> !inDiv(o.s,o.e) && !inBadge(o.s,o.e) && !inMarker(o.s,o.e));   // divider/badge/marker cms handled by own-Y, not block-shift
+    let ops = opsForPage(FM.fields.filter(f=>f.page===p), st.priceShift, skip).concat(shiftOps);
+    // carve divider AND badge spans out of block-deletes so bundled ones are never collaterally deleted
+    const protect=[...divs.map(v=>v.full), ...bdg.spans].sort((a,b)=>a[0]-b[0]);
+    let dels=[];
+    for(const d of st.deletes){
+      const inside = protect.filter(v=> d[0]<=v[0] && v[1]<=d[1]).sort((a,b)=>a[0]-b[0]);
+      if(!inside.length){ dels.push(d); continue; }
+      let cur=d[0];
+      for(const v of inside){ if(v[0]>cur) dels.push([cur,v[0]]); cur=v[1]; }
+      if(cur<d[1]) dels.push([cur,d[1]]);
+    }
+    for(const d of dels) ops.push({s:d[0],e:d[1],rep:enc(keepFont(d,p))});
+    if(dels.length){
+      ops = ops.filter(o=> !dels.some(d=> d[0]<=o.s && o.e<=d[1] && !(o.s===d[0]&&o.e===d[1])) );
+    }
+    for(const o of dividerOps(divs, st.removedSlots)) ops.push(o);   // reposition/delete each divider by its own Y
+    for(const o of bdg.ops) ops.push(o);   // delete removed items' NEW badges + ride survivors up by their own Y
+    for(const sp of mkDelSpans) ops.push({s:sp[0],e:sp[1],rep:enc(keepFont(sp,p))});   // strip edited dishes' baked markers (restamped below)
+    const pc=personaCover(p);   // personalised cover: hide any `del` spans, stamp occasion + guest
+    for(const sp of pc.del){ ops.push({s:sp[0],e:sp[1],rep:enc(keepFont(sp,p))}); }
+    let edited = ops.length ? spliceBytes(ps.pristine, ops) : ps.pristine;
+    const addStr = appendedForPage(p, st.removedSlots) + mkAppend + pc.add;
+    if(addStr){ const ab=enc(addStr); const m=new Uint8Array(edited.length+ab.length); m.set(edited,0); m.set(ab,edited.length); edited=m; }
+    ps.dict.set(PDFName.of('Length'), PDFNumber.of(edited.length));
+    doc.context.assign(ps.ref, PDFRawStream.of(ps.dict, edited));
+  }
+  lastBytes = await doc.save({useObjectStreams:false}); try{MEM.tick();}catch(_){}
+  return lastBytes;
+}
+async function renderPreview(){
+  const my = ++renderToken;
+  document.getElementById('busy').classList.add('on');
+  const bytes = lastBytes || await regenerate();
+  try{
+    if(pdfjsDoc){ pdfjsDoc.destroy(); pdfjsDoc=null; }
+    const task = pdfjsLib.getDocument({data: bytes.slice(0)});
+    const pdf = await task.promise;
+    if(my!==renderToken){ pdf.destroy(); return; }
+    pdfjsDoc = pdf;
+    const page = await pdf.getPage(activePage+1);
+    const pane = document.getElementById('previewPane');
+    const avail = pane.clientWidth - 28;
+    const base = page.getViewport({scale:1});
+    const scale = Math.min(avail/base.width, 2.2);
+    const vp = page.getViewport({scale: scale*window.devicePixelRatio});
+    const canvas = document.getElementById('preview'), ctx=canvas.getContext('2d');
+    canvas.width=vp.width; canvas.height=vp.height;
+    canvas.style.width=(vp.width/window.devicePixelRatio)+'px';
+    await page.render({canvasContext:ctx, viewport:vp}).promise;
+  }catch(e){ if(!(e&&(e.name==='RenderingCancelledException'||String(e.message||e).includes('Rendering cancelled')))) console.error(e); }
+  if(my===renderToken) document.getElementById('busy').classList.remove('on');
+}
+
+// ---------- spell + glyph ----------
+const deacc=s=>s.normalize('NFD').replace(/[\u0300-\u036f]/g,'');   // JALAPEÑO -> JALAPENO for dictionary lookup
+function wordAllowed(raw){
+  const w = deacc(raw).replace(/[^A-Za-z']/g,'').toLowerCase().replace(/^'+|'+$/g,'');
+  if(!w || w.length<2) return true;
+  if(IGNORED.has(w)||CULINARY.has(w)||MENU.has(w)||BASE.has(w)) return true;
+  if(w.endsWith('s') && (BASE.has(w.slice(0,-1))||CULINARY.has(w.slice(0,-1))||MENU.has(w.slice(0,-1)))) return true;
+  if(w.includes("'") && BASE.has(w.replace(/'/g,''))) return true;
+  // hyphen/slash compounds (IN-HOUSE, SWEET/SOUR): fine if every part is a word
+  if(/[-\/]/.test(raw)){ const parts=raw.split(/[-\/]+/).filter(p=>/[A-Za-z]/.test(p)); if(parts.length>1 && parts.every(p=>wordAllowed(p))) return true; }
+  return false;
+}
+function getCaret(el){ const s=getSelection(); if(!s.rangeCount) return null; const r=s.getRangeAt(0); const pre=r.cloneRange(); pre.selectNodeContents(el); pre.setEnd(r.endContainer,r.endOffset); return pre.toString().length; }
+function setCaret(el,off){ if(off==null) return; let n, rem=off, w=document.createTreeWalker(el,NodeFilter.SHOW_TEXT,null); while(n=w.nextNode()){ if(rem<=n.textContent.length){ const r=document.createRange(); r.setStart(n,rem); r.collapse(true); const s=getSelection(); s.removeAllRanges(); s.addRange(r); return; } rem-=n.textContent.length; } const r=document.createRange(); r.selectNodeContents(el); r.collapse(false); const s=getSelection(); s.removeAllRanges(); s.addRange(r); }
+function highlightField(el){
+  const kind=el.dataset.kind, allowed=ALLOWED[kind]||ALLOWED.name;
+  const text=normTypo(el.textContent).toUpperCase(), off=document.activeElement===el?getCaret(el):null;
+  const toks=text.match(/(\s+|[^\s]+)/g)||[]; let html="";
+  for(const tok of toks){
+    if(/^\s+$/.test(tok)){ html+=tok.replace(/ /g,'&nbsp;'); continue; }
+    let inner="", gb=false;
+    for(const ch of tok){ if(allowed.indexOf(ch)===-1){ inner+="<span class='gl' title='“"+esc(ch)+"” isn’t in the menu font'>"+esc(ch)+"</span>"; gb=true; } else inner+=esc(ch); }
+    if(!gb && !wordAllowed(tok)) html+="<span class='sp' data-w='"+esc(deacc(tok).replace(/[^A-Za-z']/g,''))+"'>"+inner+"</span>";
+    else html+=inner;
+  }
+  el.innerHTML=html||"&nbsp;"; if(off!=null) setCaret(el,off);
+}
+function lev(a,b,max){ const m=a.length,n=b.length; if(Math.abs(m-n)>max) return max+1; let p=Array.from({length:n+1},(_,i)=>i); for(let i=1;i<=m;i++){ let c=[i],best=i; for(let j=1;j<=n;j++){ const d=a[i-1]===b[j-1]?0:1; c[j]=Math.min(p[j]+1,c[j-1]+1,p[j-1]+d); best=Math.min(best,c[j]); } if(best>max) return max+1; p=c; } return p[n]; }
+function suggest(word){ word=word.toLowerCase(); const f=word[0],res=[]; const scan=arr=>{ for(const c of arr){ if(c[0]!==f||Math.abs(c.length-word.length)>2) continue; const d=lev(word,c,2); if(d<=2) res.push([d,c]); } }; scan(CULINARY_LIST); scan(BASE_LIST); res.sort((a,b)=>a[0]-b[0]||a[1].length-b[1].length); const seen=new Set(),out=[]; for(const[,c]of res){ if(!seen.has(c)){seen.add(c);out.push(c);} if(out.length>=3) break; } return out; }
+
+// ---------- editor ----------
+function itemsForPage(p){
+  const names=FM.fields.filter(f=>f.role==='name'&&f.page===p);
+  const descs=FM.fields.filter(f=>f.role==='desc'&&f.page===p);
+  const prices=FM.fields.filter(f=>f.role==='price'&&f.page===p);
+  const used=new Set();
+  const items=names.map(n=>{
+    const span=15.5*(n.lines.length-1);
+    const pr=prices.filter(x=> x.x>n.x && x.x<n.x+260 && x.y<=n.y+6 && x.y>=n.y-span-7).sort((a,b)=>a.x-b.x);
+    pr.forEach(x=>used.add(x.id));
+    const d=descs.filter(x=>Math.abs(x.x-n.x)<6 && n.y>x.y && n.y-x.y<62).sort((a,b)=>b.y-a.y)[0]||null;
+    return {name:n, prices:pr, desc:d, y:n.y, x:n.x};
+  }).sort((a,b)=> (Math.abs(a.x-b.x)>40? a.x-b.x : b.y-a.y));
+  const extras=prices.filter(x=>!used.has(x.id));
+  return {items,extras};
+}
+function descText(d){ return (d.id in edits)? edits[d.id] : d.display; }
+
+// ----- ADD-ITEM UI -----
+function sectionsForPage(p){ let r=[]; (SECTIONS||[]).forEach((s,i)=>{ if(s.page===p) r.push(Object.assign({_i:i},s)); }); return r; }
+function addedCountInSec(i){ return added.filter(a=>a.sec===i).length; }
+function secCapacity(s){ return Math.max(1, Math.floor(s.gap_below/s.slot)); }
+function colWord(x){ return x<200?'left':x<450?'middle':'right'; }
+function renderAddZone(ed){
+  const secs=sectionsForPage(activePage);
+  if(!secs.length) return;
+  added.forEach((a,idx)=>{
+    if(SECTIONS[a.sec].page!==activePage) return;
+    const c=document.createElement('div'); c.className='addcard';
+    const n=document.createElement('span'); n.className='ac-n'; n.textContent=a.name||'(unnamed)';
+    const t=document.createElement('span'); t.className='ac-tag'; t.textContent='NEW IN '+SECTIONS[a.sec].label;
+    const pr=document.createElement('span'); pr.className='ac-price'; pr.textContent=(a.price?('\u20b9'+a.price):'')+(a.price2?('  \u20b9'+a.price2):'');
+    const x=document.createElement('button'); x.className='ac-x'; x.textContent='\u2715'; x.title='Remove this new item';
+    x.onclick=()=>{ const k=added.indexOf(a); if(k>=0)added.splice(k,1); buildEditor(); schedulePreview(); };
+    c.append(n,t,pr,x); ed.appendChild(c);
+  });
+  const zone=document.createElement('div'); zone.className='addzone';
+  const btn=document.createElement('button'); btn.className='addbtn'; btn.textContent='+  Add a new item';
+  const form=document.createElement('div'); form.className='addform';
+  const opts=secs.map(s=>{ const cat=s.category||colWord(s.col_x).toUpperCase(); const sub=(s.label&&s.label!==cat)?(' \u00b7 '+s.label.charAt(0)+s.label.slice(1).toLowerCase()):(' \u00b7 '+colWord(s.col_x)+' column'); return '<option value="'+s._i+'">'+cat+sub+' \u00b7 room for '+(secCapacity(s)-addedCountInSec(s._i))+' more</option>'; }).join('');
+  form.innerHTML='<label>Section</label><select class="af-sec">'+opts+'</select>'
+    +'<label>Name</label><input type="text" class="af-name" maxlength="18" placeholder="DATE & HONEY">'
+    +'<div class="afmeta af-nmeta"></div>'
+    +'<label>Description</label><textarea class="af-desc" maxlength="120" placeholder="MEDJOOL DATES, ACACIA HONEY, MASCARPONE CREAM"></textarea>'
+    +'<div class="afmeta af-dmeta"></div>'
+    +'<div class="af2"><div><label>Grams</label><input type="text" class="af-grams" maxlength="4" placeholder="130"></div>'
+    +'<div><label class="af-plabel">Price \u20b9</label><input type="text" class="af-price" maxlength="4" placeholder="560"></div>'
+    +'<div class="af-p2wrap" style="display:none"><label>Large \u20b9</label><input type="text" class="af-price2" maxlength="4" placeholder="760"></div></div>'
+    +'<label>Markers</label><div class="afchk">'
+    +'<label><input type="checkbox" class="af-a" value="dairy" checked> Dairy</label>'
+    +'<label><input type="checkbox" class="af-a" value="gluten" checked> Gluten</label>'
+    +'<label><input type="checkbox" class="af-a" value="jain"> Jain</label>'
+    +'<label><input type="checkbox" class="af-a" value="new" checked> NEW badge</label></div>'
+    +'<div class="afbtns"><button class="afadd">Add to menu</button><button class="afcancel">Cancel</button></div>';
+  btn.onclick=()=>{ form.classList.toggle('open'); if(form.classList.contains('open')) form.querySelector('.af-name').focus(); };
+  zone.append(btn,form); ed.appendChild(zone);
+  const nameEl=form.querySelector('.af-name'), descEl=form.querySelector('.af-desc'),
+        nmeta=form.querySelector('.af-nmeta'), dmeta=form.querySelector('.af-dmeta'),
+        addBtn=form.querySelector('.afadd'), secEl=form.querySelector('.af-sec'),
+        gramsEl=form.querySelector('.af-grams'), priceEl=form.querySelector('.af-price'),
+        price2El=form.querySelector('.af-price2'), p2wrap=form.querySelector('.af-p2wrap'), plabel=form.querySelector('.af-plabel');
+  function bad(s,allowed){ const u=(s||'').toUpperCase(); const seen={}; const r=[]; for(const c of u){ if(allowed.indexOf(c)===-1&&!seen[c]){seen[c]=1;r.push(c);} } return r; }
+  function validate(){
+    const nm=normTypo(nameEl.value).toUpperCase().trim(), de=normTypo(descEl.value).toUpperCase().trim();
+    const gr=gramsEl.value.trim(); const fullDesc=de+(gr?(' ['+gr+'GMS]'):'');
+    const nb=bad(nm,ALLOWED.name), db=bad(fullDesc,ALLOWED.desc), gb=bad(gr,ALLOWED.price);
+    const typos=s=>{const bad=[],warn=[];for(const w of (deacc(s).match(/[A-Za-z']+/g)||[])){ if(w.length>2 && !wordAllowed(w)){ const sg=suggest(w); if(sg.length) bad.push(w+' \u2192 '+sg[0].toUpperCase()+'?'); else warn.push(w.toUpperCase()); } } return {bad,warn};};
+    const spN=typos(nm), spD=typos(de);   // bad = likely misspelling (blocks); warn = unrecognised word (soft)
+    nmeta.textContent = nb.length?('can\u2019t print:  '+nb.map(c=>c===' '?'space':c).join('  ')):(spN.bad.length?('spelling: '+spN.bad.join('  ')):(spN.warn.length?('check: '+spN.warn.join(' ')):(nm.length+'/18'))); nmeta.className='afmeta'+((nb.length||spN.bad.length)?' bad':'');
+    const ov=wrapDesc(fullDesc,56,2).overflow;
+    dmeta.textContent = db.length?('can\u2019t print:  '+db.map(c=>c===' '?'space':c).join('  ')):(ov?'too long \u2014 trim to fit 2 lines':(spD.bad.length?('spelling: '+spD.bad.join('  ')):(spD.warn.length?('check: '+spD.warn.join(' ')):(fullDesc.length+' chars')))); dmeta.className='afmeta'+((db.length||ov||spD.bad.length)?' bad':'');
+    const si=+secEl.value, sec=SECTIONS[si], full=addedCountInSec(si)>=secCapacity(sec);
+    const two=sec.price_right_2!=null; p2wrap.style.display=two?'':'none'; plabel.textContent=two?'Regular \u20b9':'Price \u20b9';
+    const p2b=two?bad(price2El.value.trim(),ALLOWED.price):[];
+    if(full){ nmeta.textContent='this section is full \u2014 remove one or pick another'; nmeta.className='afmeta bad'; }
+    addBtn.disabled = !nm||!de||nb.length||db.length||gb.length||p2b.length||ov||full||spN.bad.length||spD.bad.length;
+  }
+  nameEl.oninput=descEl.oninput=gramsEl.oninput=priceEl.oninput=price2El.oninput=secEl.onchange=validate; validate();
+  form.querySelector('.afcancel').onclick=()=>{ form.classList.remove('open'); };
+  addBtn.onclick=()=>{
+    if(addBtn.disabled) return;
+    const gr=gramsEl.value.trim(); let de=normTypo(descEl.value).toUpperCase().trim();
+    de=de.replace(/\s*\[\d+\s*GMS\]\s*$/i,''); if(gr) de+=' ['+gr+'GMS]';
+    const al=[]; form.querySelectorAll('.af-a:checked').forEach(c=>al.push(c.value));
+    added.push({sec:+secEl.value, name:normTypo(nameEl.value).toUpperCase().trim(), desc:de, price:priceEl.value.trim(), price2:price2El.value.trim(), allergens:al, _id:++addSeq});
+    buildEditor(); schedulePreview();
+  };
+}
+
+function buildEditor(){
+  const ed=document.getElementById('editor'); ed.innerHTML="";
+  const {items,extras}=itemsForPage(activePage);
+  const rmCount=items.filter(it=>removed.has(it.name.id)).length;
+  const _nav=((FM&&FM.nav_sections)||[]).filter(s=>s.page===activePage);
+  const _secOf={}; let _order=items;
+  if(_nav.length){
+    const navOf=(it)=>{ const ix=it.name.x, iy=it.name.y; let best=null,bg=Infinity,ba=null,bag=Infinity;
+      for(const s of _nav){ const dx=Math.abs(s.x-ix), gap=s.y-iy; if(gap<-6) continue; if(gap<bag){bag=gap;ba=s;} if(dx<=140&&gap<bg){bg=gap;best=s;} } return (best||ba||{}).label||''; };
+    for(const it of items) _secOf[it.name.id]=navOf(it);
+    const _idx=l=>{ for(let i=0;i<_nav.length;i++) if(_nav[i].label===l) return i; return 99; };
+    _order=items.slice().sort((a,b)=>{ const d=_idx(_secOf[a.name.id])-_idx(_secOf[b.name.id]); return d||(b.name.y-a.name.y); });
+  } else {
+    const _secs=(typeof sectionsForPage==='function')?sectionsForPage(activePage):[];
+    const so=(it)=>{ const ix=it.name.x, iy=it.name.y; let best='',bs=Infinity; for(const s of _secs){ const dx=Math.abs(s.col_x-ix); if(dx>140) continue; if(iy<(s.last_y-2)) continue; const sc=(iy-s.last_y)+dx*0.01; if(sc<bs){bs=sc;best=s.label;} } return best; };
+    for(const it of items) _secOf[it.name.id]=so(it);
+  }
+  window.__secCounts={};
+  for(const it of items){ const L=_secOf[it.name.id]||'—'; if(!(L in window.__secCounts)) window.__secCounts[L]={live:0}; if(!removed.has(it.name.id)) window.__secCounts[L].live++; }
+  let _lastSec=null, _secIdx=-1;
+  for(const it of _order){
+    const _L=_secOf[it.name.id]||'';
+    if(_L!==_lastSec){ _lastSec=_L; _secIdx++;
+      const sh=document.createElement('div'); sh.className='grouphd sechd'; sh.id='sec-'+_secIdx; sh.dataset.sec=_L;
+      const cnt=(window.__secCounts[_L]||{}).live||0;
+      sh.innerHTML='<span>'+(_L||'Items')+'</span><span class="n">'+cnt+' item'+(cnt===1?'':'s')+'</span>';
+      ed.appendChild(sh);
+    }
+    if(removed.has(it.name.id)){
+      const strip=document.createElement('div'); strip.className='rmstrip';
+      const nm=document.createElement('span'); nm.className='rmname'; nm.textContent=(it.name.id in edits)?edits[it.name.id]:it.name.display;
+      const tag=document.createElement('span'); tag.className='rmtag'; tag.textContent='removed';
+      const rb=document.createElement('button'); rb.className='restore'; rb.type='button'; rb.textContent='Restore';
+      rb.addEventListener('click',()=>{ removed.delete(it.name.id); buildEditor(); regenerate().then(renderPreview); });
+      strip.appendChild(nm); strip.appendChild(tag); strip.appendChild(rb); ed.appendChild(strip);
+      continue;
+    }
+    const card=document.createElement('div'); card.className='card';
+    const nrow=document.createElement('div'); nrow.className='nrow';
+    const name=document.createElement('div'); name.className='name'; name.dataset.id=it.name.id; name.dataset.kind='name'; name.dataset.orig=it.name.display; name.contentEditable='true';
+    name.textContent = (it.name.id in edits)? edits[it.name.id] : it.name.display;
+    nrow.appendChild(name);
+    const pr=document.createElement('div'); pr.className='prices';
+    for(const p of it.prices){ const w=document.createElement('div'); w.className='pwrap'; const inp=document.createElement('input'); inp.className='price'; inp.dataset.id=p.id; inp.dataset.orig=p.text; inp.value=(p.id in edits)?edits[p.id]:p.text; inp.inputMode='numeric'; w.appendChild(inp); pr.appendChild(w); }
+    nrow.appendChild(pr);
+    const rm=document.createElement('button'); rm.className='rm'; rm.type='button'; rm.title='Remove this item from the menu'; rm.textContent='✕';
+    rm.addEventListener('click',()=>{ removed.add(it.name.id); buildEditor(); regenerate().then(renderPreview); });
+    nrow.appendChild(rm); card.appendChild(nrow);
+
+    if(it.desc){
+      const desc=document.createElement('div'); desc.className='desc'; desc.dataset.id=it.desc.id; desc.dataset.kind='desc'; desc.dataset.orig=it.desc.display; desc.contentEditable='true';
+      desc.textContent = descText(it.desc);
+      card.appendChild(desc);
+      const meta=document.createElement('div'); meta.className='metarow';
+      const _dcap=maxLinesAt(it.desc, it.desc.size);
+      const lbl=document.createElement('span'); lbl.className='lbl'; lbl.textContent='Description · up to '+_dcap+' line'+(_dcap>1?'s':'');
+      const ctr=document.createElement('span'); ctr.className='ctr'; ctr.dataset.for=it.desc.id;
+      meta.appendChild(lbl); meta.appendChild(ctr); card.appendChild(meta);
+    }
+    const hint=document.createElement('div'); hint.className='hint'; card.appendChild(hint);
+    // marker chips — add/remove dairy / gluten / Jain / Ghaslet(spicy) / NEW per dish
+    if(FIELD[it.name.id] && FIELD[it.name.id].markerBase){
+      const mrow=document.createElement('div'); mrow.className='markrow';
+      const ml=document.createElement('span'); ml.className='mlbl'; ml.textContent='Markers'; mrow.appendChild(ml);
+      const cur=dishMarkers(it.name.id);
+      for(const t of MARKER_TYPES){
+        const chip=document.createElement('button'); chip.type='button'; chip.className='mchip m-'+t+(cur.has(t)?' on':'');
+        chip.innerHTML=(MARKER_ICON[t]||'')+' '+MARKER_LABEL[t];
+        chip.title=(cur.has(t)?'Remove ':'Add ')+MARKER_LABEL[t]+' marker';
+        chip.addEventListener('click',()=>{ const s=dishMarkers(it.name.id); if(s.has(t))s.delete(t); else s.add(t); markerEdits[it.name.id]=MARKER_TYPES.filter(x=>s.has(x)); chip.classList.toggle('on'); chip.title=(s.has(t)?'Remove ':'Add ')+MARKER_LABEL[t]+' marker'; schedulePreview(); });
+        mrow.appendChild(chip);
+      }
+      card.appendChild(mrow);
+    }
+    ed.appendChild(card);
+    highlightField(name); if(it.desc){ highlightField(card.querySelector('.desc')); updateCtr(card.querySelector('.desc')); }
+  }
+  if(extras.length){ const eh=document.createElement('div'); eh.className='grouphd'; eh.textContent='Other prices'; ed.appendChild(eh);
+    const card=document.createElement('div'); card.className='card'; const pr=document.createElement('div'); pr.className='prices';
+    for(const p of extras){ const w=document.createElement('div'); w.className='pwrap'; const inp=document.createElement('input'); inp.className='price'; inp.dataset.id=p.id; inp.dataset.orig=p.text; inp.value=(p.id in edits)?edits[p.id]:p.text; inp.inputMode='numeric'; w.appendChild(inp); pr.appendChild(w); }
+    card.appendChild(pr); ed.appendChild(card);
+  }
+  updateGate();
+
+  renderAddZone(ed);
+  if(typeof syncRail==='function') syncRail();
+}
+function updateCtr(el){
+  const f=FIELD[el.dataset.id]; if(!f) return;
+  const ctr=document.querySelector(".ctr[data-for='"+el.dataset.id+"']"); if(!ctr) return;
+  const val=el.textContent.replace(/\u00a0/g,' ').trim();
+  const fit=fitDesc(f, val); const w={lines:fit.lines, overflow:fit.overflow};
+  const _used=fit.lines.filter(Boolean).length, _cap=maxLinesAt(f, fit.size), _fitted=fit.size<f.size-0.005;
+  ctr.textContent = w.overflow ? 'too long — even at the smallest size'
+                  : (_used+'/'+_cap+' lines'+(_fitted?' · auto-fitted':''));
+  ctr.classList.toggle('over', w.overflow);
+}
+
+// ---------- events ----------
+let etimer=null, ptimer=null;
+function schedulePreview(){ clearTimeout(ptimer); ptimer=setTimeout(async()=>{ await regenerate(); renderPreview(); }, 380); }
+document.getElementById('editor').addEventListener('input', e=>{
+  const el=e.target;
+  if(el.classList.contains('name')||el.classList.contains('desc')){
+    const t=normTypo(el.textContent).toUpperCase().trim();
+    if(t===el.dataset.orig) delete edits[el.dataset.id]; else edits[el.dataset.id]=t;
+    if(el.classList.contains('desc')) updateCtr(el);
+    clearTimeout(etimer); etimer=setTimeout(()=>{ highlightField(el); updateGate(); }, 160);
+    schedulePreview();
+  } else if(el.classList.contains('price')){
+    const t=el.value.trim();
+    if(t===el.dataset.orig) delete edits[el.dataset.id]; else edits[el.dataset.id]=t;
+    let bad=false; for(const ch of el.value) if(ALLOWED.price.indexOf(ch)===-1) bad=true;
+    el.classList.toggle('err',bad); updateGate(); schedulePreview();
+  }
+});
+const pop=document.getElementById('popover');
+document.getElementById('editor').addEventListener('click', e=>{
+  const sp=e.target.closest('.sp'); if(!sp){ pop.style.display='none'; return; }
+  const word=sp.dataset.w, sug=suggest(word); let html="<div class='word'>"+esc(word)+"</div>";
+  if(sug.length) for(const s of sug){ const disp=word===word.toUpperCase()?s.toUpperCase():s; html+="<button data-fix='"+esc(disp)+"'>"+esc(disp)+"</button>"; }
+  else html+="<div style='font-size:12px;color:#9a8f7c;margin:2px 4px 6px'>no suggestion</div>";
+  html+="<button class='ignore' data-ignore='"+esc(word.toLowerCase())+"'>Ignore — add to dictionary</button>";
+  pop.innerHTML=html; pop.style.display='block'; const r=sp.getBoundingClientRect();
+  pop.style.left=(scrollX+r.left)+'px'; pop.style.top=(scrollY+r.bottom+4)+'px'; pop._t=sp;
+});
+pop.addEventListener('click', e=>{
+  const b=e.target.closest('button'); if(!b) return; const sp=pop._t, fieldEl=sp.closest('.name,.desc');
+  if(b.dataset.fix!=null){
+    const parts=fieldEl.textContent.match(/(\s+|[^\s]+)/g)||[]; let done=false;
+    fieldEl.textContent=parts.map(t=>{ if(!done&&/[^\s]/.test(t)&&deacc(t).replace(/[^A-Za-z']/g,'')===sp.dataset.w){done=true;return b.dataset.fix;} return t; }).join('');
+    const t=normTypo(fieldEl.textContent).trim(); if(t===fieldEl.dataset.orig) delete edits[fieldEl.dataset.id]; else edits[fieldEl.dataset.id]=t;
+    if(fieldEl.classList.contains('desc')) updateCtr(fieldEl);
+    schedulePreview();
+  } else if(b.dataset.ignore!=null){ IGNORED.add(b.dataset.ignore); try{ localStorage.setItem('capiche_dict', JSON.stringify([...IGNORED])); }catch(_){} }
+  pop.style.display='none';
+  document.querySelectorAll(".name,.desc").forEach(highlightField); updateGate();
+});
+document.addEventListener('click', e=>{ if(!e.target.closest('#popover')&&!e.target.closest('.sp')) pop.style.display='none'; });
+document.querySelectorAll('.tabs button').forEach(b=> b.addEventListener('click', ()=>{
+  document.querySelectorAll('.tabs button').forEach(x=>x.classList.remove('on')); b.classList.add('on');
+  activePage=+b.dataset.pg; document.getElementById('ptag').textContent='— '+(activePage===0?'Front':'Back');
+  buildEditor(); renderPreview();
+}));
+function updateGate(){
+  let sp=0,spBase=0,gl=0,pe=0,ov=0;
+  // spelling flags on untouched baseline text stay soft — the PDF already
+  // prints it; only flags on text the user edited (or added) block export
+  document.querySelectorAll('.name,.desc').forEach(el=>{ const n=el.querySelectorAll('.sp').length; if(!n) return; if(el.dataset.id in edits) sp+=n; else spBase+=n; });
+  document.querySelectorAll('.name .gl,.desc .gl').forEach(()=>gl++);
+  document.querySelectorAll('.price.err').forEach(()=>pe++);
+  document.querySelectorAll('.card').forEach(c=>{
+    const g=c.querySelector('.gl'),s=c.querySelector('.sp'),h=c.querySelector('.hint'); if(!h) return;
+    let over=false;
+    c.querySelectorAll('.name,.desc').forEach(el=>{ const f=FIELD[el.dataset.id]; if(f&&(el.dataset.id in edits)&&isOverflow(f,edits[el.dataset.id])) over=true; });
+    if(over) ov++;
+    if(over){c.classList.add('haswarn');h.textContent='Text is too long for the space — shorten it so it fits the line limit.';}
+    else if(g){c.classList.add('haswarn');h.textContent='Some characters aren’t in the menu font and can’t be printed.';}
+    else if(s){c.classList.add('haswarn');h.textContent='Possible spelling issue — click the underlined word to fix or ignore.';}
+    else c.classList.remove('haswarn');
+  });
+  const total=sp+gl+pe+ov, pill=document.getElementById('flagpill'), ex=document.getElementById('export');
+  if(total===0){ pill.className='pill ok'; pill.textContent='All clear'+(spBase?' \u00b7 '+spBase+' word'+(spBase>1?'s':'')+' to review':''); ex.disabled=false; }
+  else{ pill.className='pill bad'; const b=[]; if(sp)b.push(sp+' spelling'); if(gl)b.push(gl+' font'); if(pe)b.push(pe+' price'); if(ov)b.push(ov+' too long'); pill.textContent=b.join(' · ')+' to fix'; ex.disabled=true; }
+}
+document.getElementById('export').addEventListener('click', async ()=>{
+  const bytes=await regenerate();
+  const blob=new Blob([bytes],{type:'application/pdf'}); const url=URL.createObjectURL(blob);
+  const a=document.createElement('a'); a.href=url; a.download='Capiche_Menu.pdf'; a.click(); URL.revokeObjectURL(url);
+  try{MEM.snapshot('export');}catch(_){}
+  showChucky('Capiche_Menu.pdf');
+});
+// ---------- PERSONALISE COVER: occasion + guest name stamped on the cover, then Export/Share ----------
+const OCCASIONS=[['','—'],['WELCOME','Welcome'],['HAPPY BIRTHDAY','Birthday'],['HAPPY ANNIVERSARY','Anniversary'],
+  ['CONGRATULATIONS','Congratulations'],["LET'S CELEBRATE","Let's Celebrate"],['__custom','Custom message…']];
+function openPersona(){
+  if(document.querySelector('.persov')) return;
+  const preset=OCCASIONS.find(o=>o[0]===persona.occasion) ? persona.occasion : (persona.occasion?'__custom':'');
+  const ov=document.createElement('div'); ov.className='persov';
+  ov.innerHTML='<div class="perscard"><div class="pershd">✨ Personalise the cover<span>occasion + guest name — printed on the menu cover</span></div>'
+    +'<label class="perslbl">Occasion</label><select class="perssel">'+OCCASIONS.map(o=>'<option value="'+o[0]+'"'+(o[0]===preset?' selected':'')+'>'+o[1]+'</option>').join('')+'</select>'
+    +'<input class="persocc" maxlength="28" placeholder="OCCASION (e.g. HAPPY BIRTHDAY)" '+(preset==='__custom'?'':'style="display:none"')+' value="'+esc(preset==='__custom'?persona.occasion:'')+'">'
+    +'<label class="perslbl">Guest / table name</label><input class="persguest" maxlength="24" placeholder="GUEST NAME" value="'+esc(persona.guest||'')+'">'
+    +'<div class="persfoot"><button class="cropbtn ghost" data-a="clear" type="button">Clear</button><button class="cropbtn save" data-a="done" type="button">Done</button></div></div>';
+  document.body.appendChild(ov);
+  const sel=ov.querySelector('.perssel'), occ=ov.querySelector('.persocc'), guest=ov.querySelector('.persguest');
+  const apply=()=>{ let o = sel.value==='__custom' ? occ.value : sel.value; persona.occasion=(o||'').toUpperCase(); persona.guest=(guest.value||''); schedulePreview(); try{MEM.tick();}catch(_){} document.getElementById('persona').classList.toggle('on', !!(persona.occasion||persona.guest)); };
+  sel.onchange=()=>{ occ.style.display = sel.value==='__custom'?'':'none'; if(sel.value==='__custom') occ.focus(); apply(); };
+  occ.oninput=apply; guest.oninput=apply;
+  ov.addEventListener('click',e=>{ if(e.target===ov){ ov.remove(); return; } const b=e.target.closest('[data-a]'); if(!b)return;
+    if(b.dataset.a==='clear'){ sel.value=''; occ.value=''; occ.style.display='none'; guest.value=''; apply(); }
+    else ov.remove();
+  });
+  document.getElementById('persona').classList.toggle('on', !!(persona.occasion||persona.guest));
+}
+document.getElementById('persona').addEventListener('click', openPersona);
+
+// ---------- boot ----------
+// ---- edit-memory glue (capiche) ----
+const MEM_BRAND='capiche';
+let memBaseVer='';
+function memSnapshot(){ return { edits:{...edits}, removed:[...removed], added, markerEdits, persona:{...persona} }; }
+function memApply(st){ for(const k in edits) delete edits[k]; Object.assign(edits, st.edits||{}); removed=new Set(st.removed||[]); added=st.added||[]; markerEdits=st.markerEdits||{}; persona=Object.assign({occasion:'',guest:''}, st.persona||{}); }
+function memRebuild(){ buildEditor(); regenerate().then(renderPreview); }
+// ============ EDIT MEMORY — autosave + resume + version history (per brand) ============
+// Glue each editor must define BEFORE this block:
+//   const MEM_BRAND = 'aiko-drinks';        // unique key
+//   function memSnapshot(){ return {...}; }  // serialisable current edit state (order-stable)
+//   function memApply(state){ ... }          // mutate editor vars from a saved state
+//   function memRebuild(){ ... }             // rebuild UI + regenerate + render after apply
+//   let   memBaseVer = '';                   // fingerprint of the base PDF (for #6 update detection)
+const MEM = (function(){
+  const K='chucky_mem_'+MEM_BRAND, AUTO=K+':auto', SNAPS=K+':snaps';
+  let initial='', timer=null, statusEl=null, panel=null, ready=false;
+  const J=o=>{ try{return JSON.stringify(o);}catch(_){return '';} };
+  const P=s=>{ try{return JSON.parse(s);}catch(_){return null;} };
+  function ago(t){ const s=Math.max(0,(Date.now()-t)/1000);
+    if(s<45) return 'just now'; if(s<3600) return Math.round(s/60)+'m ago';
+    if(s<86400) return Math.round(s/3600)+'h ago'; return Math.round(s/86400)+'d ago'; }
+  const dirty=()=> J(memSnapshot())!==initial;
+  function setStatus(txt,cls){ if(!statusEl)return; statusEl.querySelector('.memtxt').textContent=txt; statusEl.dataset.state=cls||''; statusEl.style.display=txt?'':'none'; }
+  function tick(){
+    if(!ready) return;
+    clearTimeout(timer);
+    if(!dirty()){ try{localStorage.removeItem(AUTO);}catch(_){}; setStatus('',''); return; }
+    setStatus('Saving…','saving');
+    timer=setTimeout(()=>{ try{ localStorage.setItem(AUTO, J({t:Date.now(), base:memBaseVer, s:memSnapshot()})); setStatus('Saved','ok'); }catch(_){ setStatus('',''); } }, 500);
+  }
+  function snapshot(label){ if(!dirty()) return; try{ const a=P(localStorage.getItem(SNAPS))||[];
+    a.unshift({t:Date.now(), label:label||'edit', base:memBaseVer, s:memSnapshot()});
+    localStorage.setItem(SNAPS, J(a.slice(0,12))); }catch(_){} }
+  const snaps=()=> P(localStorage.getItem(SNAPS))||[];
+  function restore(state){ try{ memApply(state); memRebuild(); }catch(e){ console.error('restore failed',e); } tick(); }
+  // ---------- UI ----------
+  function build(){
+    if(document.getElementById('memwrap')) return;
+    const css=document.createElement('style'); css.textContent=`
+    #memwrap{position:fixed;left:16px;bottom:16px;z-index:60;font:12px/1.4 var(--mono,ui-monospace,monospace)}
+    #memstat{display:none;align-items:center;gap:7px;background:rgba(20,18,12,.92);color:#CFC6B4;border:1px solid rgba(244,236,221,.16);
+      border-radius:999px;padding:6px 12px;cursor:pointer;backdrop-filter:blur(6px);user-select:none;box-shadow:0 10px 30px -14px #000}
+    #memstat:hover{border-color:rgba(244,236,221,.34)}
+    #memstat .dot{width:7px;height:7px;border-radius:50%;background:#8F8676;flex:none}
+    #memstat[data-state=ok] .dot{background:#7BC96F} #memstat[data-state=saving] .dot{background:#E0A44A;animation:mempulse 1s infinite}
+    @keyframes mempulse{50%{opacity:.35}}
+    #mempanel{display:none;position:absolute;left:0;bottom:42px;width:280px;max-height:340px;overflow:auto;background:rgba(18,16,11,.98);
+      border:1px solid rgba(244,236,221,.16);border-radius:12px;padding:10px;box-shadow:0 24px 60px -24px #000}
+    #mempanel.on{display:block} #mempanel h4{margin:2px 4px 8px;font-size:10px;letter-spacing:.2em;text-transform:uppercase;color:#8F8676;font-weight:600}
+    .memrow{display:flex;align-items:center;gap:8px;padding:7px 8px;border-radius:8px;cursor:pointer;color:#CFC6B4}
+    .memrow:hover{background:rgba(244,236,221,.07)} .memrow .ml{flex:1;min-width:0} .memrow .mt{font-size:10.5px;color:#8F8676}
+    .memrow .mr{font-size:10px;color:#8F8676} .memrow.empty{color:#6f6858;cursor:default}
+    #membar{position:fixed;left:0;right:0;top:0;z-index:70;display:none;align-items:center;justify-content:center;gap:14px;
+      padding:10px 16px;background:linear-gradient(90deg,#2A1F12,#1c150c);border-bottom:1px solid rgba(224,164,74,.4);
+      color:#F4ECDD;font:13px/1.4 var(--mono,ui-monospace,monospace);box-shadow:0 8px 24px -12px #000}
+    #membar.on{display:flex} #membar b{color:#E0A44A}
+    #membar button{font:inherit;font-size:12px;padding:5px 13px;border-radius:8px;cursor:pointer;border:1px solid rgba(244,236,221,.28);background:transparent;color:#F4ECDD}
+    #membar button.pri{background:#E0A44A;border-color:#E0A44A;color:#1a1508;font-weight:600}
+    #membar button:hover{filter:brightness(1.1)}
+    @media(max-width:640px){#memwrap{left:10px;bottom:10px}#mempanel{width:min(280px,86vw)}}`;
+    document.head.appendChild(css);
+    const wrap=document.createElement('div'); wrap.id='memwrap';
+    wrap.innerHTML='<div id="memstat" title="Edit memory — click for history"><span class="dot"></span><span class="memtxt"></span> · History</div><div id="mempanel"></div>';
+    document.body.appendChild(wrap);
+    const bar=document.createElement('div'); bar.id='membar'; document.body.appendChild(bar);
+    statusEl=document.getElementById('memstat'); panel=document.getElementById('mempanel');
+    statusEl.addEventListener('click',togglePanel);
+    document.addEventListener('click',e=>{ if(panel&&!wrap.contains(e.target)) panel.classList.remove('on'); });
+  }
+  function togglePanel(e){ e&&e.stopPropagation(); if(!panel)return; const open=!panel.classList.contains('on'); if(open)renderPanel(); panel.classList.toggle('on',open); }
+  function renderPanel(){
+    const list=snaps(); let h='<h4>Version history</h4>';
+    if(!list.length) h+='<div class="memrow empty">No saved versions yet.<br>Exports and edits are saved here.</div>';
+    else list.forEach((v,i)=>{ h+='<div class="memrow" data-i="'+i+'"><span class="ml"><div>'+esc(v.label)+'</div><div class="mt">'+ago(v.t)+(v.base!==memBaseVer?' · older menu':'')+'</div></span><span class="mr">restore</span></div>'; });
+    panel.innerHTML=h;
+    panel.querySelectorAll('.memrow[data-i]').forEach(r=>r.addEventListener('click',()=>{ const v=snaps()[+r.dataset.i]; if(v){ snapshot('before restore'); restore(v.s); panel.classList.remove('on'); } }));
+  }
+  function esc(s){ return (s+'').replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
+  function checkResume(){
+    const a=P(localStorage.getItem(AUTO)); if(!a||!a.s||J(a.s)===initial) return;
+    const bar=document.getElementById('membar'); if(!bar) return;
+    const stale=a.base && memBaseVer && a.base!==memBaseVer;
+    bar.innerHTML='<span>'+(stale?'You have edits from a <b>previous version</b> of this menu ('+ago(a.t)+').':'You left <b>unsaved edits</b> here '+ago(a.t)+'.')+'</span>'
+      +'<button class="pri" id="memres">Resume them</button><button id="memfresh">Start fresh</button>';
+    bar.classList.add('on');
+    bar.querySelector('#memres').addEventListener('click',()=>{ restore(a.s); bar.classList.remove('on'); });
+    bar.querySelector('#memfresh').addEventListener('click',()=>{ try{localStorage.removeItem(AUTO);}catch(_){}; bar.classList.remove('on'); tick(); });
+  }
+  function init(){ try{ initial=J(memSnapshot()); }catch(_){ initial=''; } ready=true; build(); checkResume(); }
+  return { init, tick, snapshot, restore, ago };
+})();
+
+
+async function boot(){
+  try{
+    document.getElementById('bootmsg').textContent='Loading dictionaries…';
+    [FM, BASE_LIST, CULINARY_LIST] = await Promise.all([
+      fetch('fieldmap.json?v='+Date.now()).then(r=>r.json()),
+      fetch('base_words.json?v='+Date.now()).then(r=>r.json()),
+      fetch('culinary.json?v='+Date.now()).then(r=>r.json())
+    ]);
+    BASE=new Set(BASE_LIST); CULINARY=new Set(CULINARY_LIST);
+    ALLOWED=FM.allowed; ADV=FM.adv; PAGES=FM.page_sizes; ICONS=FM.icons; SECTIONS=FM.sections||[]; AC=FM.add_const;
+    FM.fields.forEach(f=>FIELD[f.id]=f);
+    // decode PDF escapes (e.g. \\222) then normalize smart-punctuation baked into the SOURCE menu so the editor shows clean, printable text
+    const _pdfEsc=s=>(s||'').replace(/\\([0-7]{1,3})/g,(m,o)=>String.fromCharCode(parseInt(o,8)&0xff)).replace(/\\([()\\])/g,'$1');
+    FM.fields.forEach(f=>{ if(f.display) f.display=normTypo(_pdfEsc(f.display)); if(f.text) f.text=normTypo(_pdfEsc(f.text)); });
+    for(const f of FM.fields){ if(f.role==='name'||f.role==='desc'){ for(const w of deacc((f.display||'').toLowerCase()).split(/[^a-z']+/)) if(w) MENU.add(w); } }
+    try{ const saved=JSON.parse(localStorage.getItem('capiche_dict')||'[]'); saved.forEach(w=>IGNORED.add(w)); }catch(_){}
+    document.getElementById('bootmsg').textContent='Loading your menu file…';
+    pdfBytesOrig = new Uint8Array(await (await fetch('capiche.pdf?v='+Date.now())).arrayBuffer()); memBaseVer='v'+pdfBytesOrig.length;
+    doc = await PDFDocument.load(pdfBytesOrig);
+    for(let p=0;p<doc.getPageCount();p++){
+      const page=doc.getPage(p); const ref=page.node.get(PDFName.of('Contents'));
+      const stream=doc.context.lookup(ref);
+      pageStreams.push({ref, dict:stream.dict, pristine:stream.contents.slice()});
+    }
+    buildEditor(); try{MEM.init();}catch(e){console.error(e);}
+    await regenerate(); await renderPreview();
+    document.getElementById('boot').style.display='none';
+  }catch(e){
+    document.getElementById('bootmsg').innerHTML='Couldn’t load. If you opened this file directly, it needs to be <b>served</b> (deploy it, or run a local server). <br>'+esc(String(e));
+    console.error(e);
+  }
+}
+// ---------- Chucky: mascot + greeting + export celebration (UI only; engine untouched) ----------
+const CHUCKY_SVG='<svg viewBox="0 0 220 220" fill="none" stroke="currentColor" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round">'
++'<path d="M58 188 C22 188 24 156 48 158" fill="#fff"/>'
++'<path d="M70 200 C34 200 36 150 60 128 C72 117 78 116 86 112 C104 124 124 124 142 114 C150 119 160 126 168 138 C190 168 178 201 138 200 C116 200 92 200 70 200 Z" fill="#fff"/>'
++'<path d="M96 199 q6 6 12 0 M120 199 q6 6 12 0" stroke-width="2.4"/>'
++'<path d="M74 70 L68 30 L94 54 C102 50 118 50 126 56 L152 32 L146 74 C156 96 150 120 110 121 C72 121 64 94 74 70 Z" fill="#fff"/>'
++'<path d="M139 67 L154 58" stroke-width="3.6"/>'
++'<rect x="74" y="64" width="32" height="20" fill="currentColor" stroke="none"/>'
++'<rect x="112" y="62" width="28" height="17" fill="currentColor" stroke="none"/>'
++'<rect x="103" y="69" width="10" height="5" fill="currentColor" stroke="none"/>'
++'<rect x="79" y="78" width="6.5" height="4.5" fill="#fff" stroke="none"/>'
++'<rect x="116" y="74" width="5" height="3.5" fill="#fff" stroke="none"/>'
++'<path d="M106 95 q5 6 10 1" stroke-width="2.6"/>'
++'<path d="M80 85 L56 79 M80 90 L54 91 M82 95 L58 103" stroke-width="2.2"/>'
++'<path d="M150 81 L174 75 M150 86 L176 87 M148 91 L172 99" stroke-width="2.2"/></svg>';
+const CHUCKY_LINES=[
+ "KILLED IT 😎","NAILED IT.","CHEF’S KISS 🤌","MENU SLAPS.","COOKED. LITERALLY.","SERVED 🍽️",
+ "TOO COOL FOR THE KITCHEN.","CRISPY.","MIC DROP 🎤","FLAWLESS VICTORY.","BOOM. PLATED.","CERTIFIED BANGER.",
+ "SHARPER THAN MY SHADES.","PURR-FECTION 🐾","ATE. NO CRUMBS.","HOT OUT THE OVEN.","CLEAN LIKE MY WHISKERS.",
+ "BIG CHEF ENERGY.","WHISKED IT, RISKED IT, KILLED IT.","ANOTHER ONE. 🐾","DEVOURED.","SMOOTH OPERATOR.",
+ "ICE COLD 🧊","THAT’S A WRAP.","SEASONED TO PERFECTION.","SLAYED THE PLATE.","FRESH OUTTA THE LAB.",
+ "CRUSHED IT.","GORDON WHO?","WORLD-CLASS, BABY.","SIZZLIN’.","DROPPED A BANGER.","NO NOTES.",
+ "ABSOLUTELY COOKED.","TOP TIER.","MASTERPIECE.","EXPORTED & FLEXED.","LOCKED IN 🔒","UNDEFEATED.",
+ "SAUCY.","GO OFF, CHEF.","LEGENDARY.","SHADES ON, MENU DONE.","EASY. 😼"];
+const CHUCKY_GREET=[
+ "How can I help you today, you non-skilled human?","Oh. It's you again. Let's fix this menu.",
+ "I brought the shades. You bring the typos.","Point. Click. Let me carry you.",
+ "90% attitude, 10% PDF surgeon. Let's go.","Try not to break anything. I'm watching. 😎",
+ "Cleaner. Shorter. Better. Sound familiar?","Cool cats edit fast. Keep up.",
+ "I do the hard part. You take the credit.","Ready when you are, slowpoke.",
+ "I've seen worse menus. Barely.","Sit. Stay. Watch a professional work.",
+ "Another menu you couldn't handle alone? Adorable.","Relax, human. The cat's got it."];
+let _chuckyN=0;
+function _cbday(){ const n=new Date(); return Math.floor(new Date(n.getFullYear(),n.getMonth(),n.getDate()).getTime()/86400000); }
+function chuckyLine(){ const i=((_cbday()*7+_chuckyN++)%CHUCKY_LINES.length+CHUCKY_LINES.length)%CHUCKY_LINES.length; return CHUCKY_LINES[i]; }
+function chuckyGreet(){ let c=+(sessionStorage.getItem('chucky_g')||0); sessionStorage.setItem('chucky_g',c+1);
+  return CHUCKY_GREET[((_cbday()*5+c)%CHUCKY_GREET.length+CHUCKY_GREET.length)%CHUCKY_GREET.length]; }
+function showChucky(fn){ const el=document.getElementById('celebrate'); if(!el) return;
+  el.querySelector('.cbline').textContent=chuckyLine(); el.querySelector('.cbsub').textContent=(fn||'menu')+' — exported';
+  el.classList.remove('on'); void el.offsetWidth; el.classList.add('on');
+  clearTimeout(showChucky._t); showChucky._t=setTimeout(()=>el.classList.remove('on'),2700); }
+function sayChucky(msg,ms){ const s=document.getElementById('chuckysay'); if(!s) return;
+  s.textContent=msg||chuckyGreet(); s.classList.remove('on'); void s.offsetWidth; s.classList.add('on');
+  clearTimeout(sayChucky._t); if(ms!==0) sayChucky._t=setTimeout(()=>s.classList.remove('on'),ms||6000); }
+(function(){
+  const o=document.createElement('div'); o.id='celebrate';
+  o.innerHTML='<div class="cbcard"><div class="cbcat">'+CHUCKY_SVG+'</div><div class="cbline"></div><div class="cbsub"></div></div>';
+  o.addEventListener('click',()=>o.classList.remove('on')); document.body.appendChild(o);
+  const say=document.createElement('div'); say.id='chuckysay'; say.addEventListener('click',()=>say.classList.remove('on')); document.body.appendChild(say);
+  const b=document.querySelector('.brand');
+  if(b){ const a=document.createElement('a'); a.className='homelink'; a.href='/chucky/'; a.title='Back to menu picker';
+    a.innerHTML='<span class="bhint">↩</span>'+CHUCKY_SVG.replace('<svg ','<svg class="chucky" ')+'<span class="ctag">CHUCKY</span>';
+    b.insertBefore(a,b.firstChild); }
+  setTimeout(()=>sayChucky(),1200);
+})();
+
+// ===================== redesign shell (engine untouched) =====================
+function syncRail(){
+  const rail=document.getElementById('rail'); if(!rail) return;
+  rail.querySelectorAll('.sec').forEach(e=>e.remove());
+  [...document.querySelectorAll('#editor .sechd')].forEach(h=>{
+    const b=document.createElement('button'); b.className='sec'; b.dataset.target=h.id;
+    const cnt=h.querySelector('.n')?h.querySelector('.n').textContent.replace(/ items?$/,''):'';
+    b.innerHTML='<span>'+(h.dataset.sec||'Items')+'</span><span class="ct">'+cnt+'</span>';
+    b.onclick=()=>{ const t=document.getElementById(h.id); if(t)t.scrollIntoView({behavior:'smooth',block:'start'});
+      rail.querySelectorAll('.sec').forEach(x=>x.classList.remove('on')); b.classList.add('on');
+      if(matchMedia('(max-width:640px)').matches) closeDrawers(); };
+    rail.appendChild(b);
+  });
+  rail.querySelectorAll('.tabs button').forEach(t=>t.classList.toggle('on',+t.dataset.pg===activePage));
+  const q=document.getElementById('q'); if(q&&q.value) filterItems(q.value);
+}
+(function(){ const ed=document.getElementById('editor'); if(!ed) return;
+  ed.addEventListener('scroll',()=>{ const heads=[...ed.querySelectorAll('.sechd')]; if(!heads.length)return;
+    const top=ed.getBoundingClientRect().top+70; let cur=heads[0];
+    for(const h of heads){ if(h.getBoundingClientRect().top<=top) cur=h; }
+    document.querySelectorAll('#rail .sec').forEach(s=>s.classList.toggle('on',s.dataset.target===cur.id));
+  },{passive:true}); })();
+function filterItems(q){ q=(q||'').trim().toLowerCase();
+  document.querySelectorAll('#editor .card').forEach(c=>{ const nm=c.querySelector('.name'),ds=c.querySelector('.desc');
+    const t=((nm?nm.textContent:'')+' '+(ds?ds.textContent:'')).toLowerCase(); c.style.display=(!q||t.includes(q))?'':'none'; });
+  document.querySelectorAll('#editor .rmstrip').forEach(r=>{ const t=(r.textContent||'').toLowerCase(); r.style.display=(!q||t.includes(q))?'':'none'; });
+  document.querySelectorAll('#editor .sechd').forEach(h=>{ let n=h.nextElementSibling,any=false;
+    while(n&&!n.classList.contains('sechd')){ if((n.classList.contains('card')||n.classList.contains('rmstrip'))&&n.style.display!=='none') any=true; n=n.nextElementSibling; }
+    h.style.display=(!q||any)?'':'none'; }); }
+function togglePrev(force){ const p=document.getElementById('previewPane'),s=document.getElementById('scrim');
+  const open=force!==undefined?force:!p.classList.contains('open');
+  p.classList.toggle('open',open); document.getElementById('rail').classList.remove('open');
+  s.classList.toggle('on',open&&matchMedia('(max-width:1080px)').matches); }
+function closeDrawers(){ document.getElementById('previewPane').classList.remove('open'); document.getElementById('rail').classList.remove('open'); document.getElementById('scrim').classList.remove('on'); }
+document.addEventListener('keydown',e=>{ if(e.key==='/'&&document.activeElement.tagName!=='INPUT'&&!document.activeElement.isContentEditable){e.preventDefault();const q=document.getElementById('q');if(q)q.focus();} });
+
+boot();
+</script>
+<script>
+// ===== REPORT A BUG -> /api/bug (attaches a preview snapshot + current edit state) =====
+(function(){
+  if(document.getElementById('bugbtn')) return;
+  const css=document.createElement('style'); css.textContent=`
+  #bugbtn{position:fixed;right:16px;bottom:16px;z-index:62;background:rgba(20,18,12,.92);color:#CFC6B4;border:1px solid rgba(244,236,221,.16);border-radius:999px;padding:7px 13px;font:12px/1.4 ui-monospace,monospace;cursor:pointer;backdrop-filter:blur(6px);box-shadow:0 10px 30px -14px #000}
+  #bugbtn:hover{border-color:rgba(240,97,107,.6);color:#F0616B}
+  #bugmodal{position:fixed;inset:0;z-index:82;display:none;align-items:center;justify-content:center;background:rgba(0,0,0,.55);padding:16px}
+  #bugmodal.on{display:flex}
+  #bugcard{width:min(460px,94vw);background:#17150f;border:1px solid rgba(244,236,221,.18);border-radius:14px;padding:18px;font-family:ui-monospace,monospace;color:#F4ECDD;box-shadow:0 30px 70px -24px #000}
+  #bugcard h3{margin:0 0 4px;font-size:15px}#bugcard p{margin:0 0 12px;font-size:11.5px;color:#8F8676;line-height:1.5}
+  #bugcard textarea{width:100%;min-height:92px;background:#0f0d08;border:1px solid rgba(244,236,221,.18);border-radius:9px;color:#F4ECDD;font:inherit;font-size:13px;padding:10px;resize:vertical;box-sizing:border-box}
+  #bugcard .r{display:flex;gap:8px;justify-content:flex-end;margin-top:12px;align-items:center}
+  #bugcard button{font:inherit;font-size:12px;padding:7px 14px;border-radius:8px;cursor:pointer;border:1px solid rgba(244,236,221,.28);background:transparent;color:#F4ECDD}
+  #bugcard button.pri{background:#F0616B;border-color:#F0616B;color:#1a0c0d;font-weight:600}
+  #bugshot{font-size:11px;color:#7BC96F;margin-top:8px;flex:1;text-align:left}`;
+  document.head.appendChild(css);
+  const btn=document.createElement('div'); btn.id='bugbtn'; btn.textContent='🐞 Report a bug'; document.body.appendChild(btn);
+  const modal=document.createElement('div'); modal.id='bugmodal';
+  modal.innerHTML='<div id="bugcard"><h3>Report a bug</h3><p>Describe what looks wrong. A snapshot of the current preview and your edits are attached, so it can be reproduced and fixed without you re-doing anything.</p><textarea id="bugdesc" placeholder="e.g. after removing a drink and adding one, the new drink overlaps the last line"></textarea><div class="r"><span id="bugshot"></span><button id="bugcancel">Cancel</button><button class="pri" id="bugsend">Send report</button></div></div>';
+  document.body.appendChild(modal);
+  const snap=()=>{ try{ const c=document.getElementById('preview'); if(c&&c.width) return c.toDataURL('image/jpeg',0.5); }catch(_){} return null; };
+  btn.onclick=()=>{ modal.classList.add('on'); document.getElementById('bugshot').textContent = snap()?'✓ preview snapshot attached':''; document.getElementById('bugdesc').focus(); };
+  const close=()=>modal.classList.remove('on');
+  document.getElementById('bugcancel').onclick=close;
+  modal.addEventListener('click',e=>{ if(e.target===modal) close(); });
+  document.getElementById('bugsend').onclick=async()=>{
+    const desc=document.getElementById('bugdesc').value.trim(); if(!desc){ document.getElementById('bugdesc').focus(); return; }
+    const sb=document.getElementById('bugsend'); sb.textContent='Sending…'; sb.disabled=true;
+    let state=null; try{ if(typeof memSnapshot==='function') state=memSnapshot(); }catch(_){}
+    const payload={ editor:(typeof MEM_BRAND!=='undefined'?MEM_BRAND:location.pathname), page:(typeof activePage!=='undefined'?activePage:null), desc, url:location.href, state, shot:snap() };
+    try{ const r=await fetch('/api/bug',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(payload)}); const j=await r.json();
+      if(j.ok){ sb.textContent='Sent ✓'; setTimeout(()=>{ close(); sb.textContent='Send report'; sb.disabled=false; document.getElementById('bugdesc').value=''; },1000); }
+      else { sb.textContent='Failed'; sb.disabled=false; }
+    }catch(e){ sb.textContent='Failed — offline?'; sb.disabled=false; }
+  };
+})();
+
+</script>
+</body>
+</html>

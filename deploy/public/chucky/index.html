@@ -1,0 +1,188 @@
+<!doctype html><html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Chucky · Bookends Menu Editor</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Lora:ital,wght@0,400;0,500;0,600;1,400&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root{--ink:#0E0D0B;--panel:#161410;--card:#1E1B15;--cream:#F4ECDD;--cream2:#E9DEC8;--cream-dim:#CFC6B4;--paper:#1E1B15;--red:#FF2A1A;--gold:#E0B020;--muted:#8F8676;--line:rgba(244,236,221,.10);--line2:rgba(244,236,221,.18);}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%}
+body{background:var(--ink);color:var(--cream);font-family:'Lora',Georgia,serif;overflow:hidden;-webkit-font-smoothing:antialiased}
+.mono{font-family:'DM Mono',ui-monospace,monospace;letter-spacing:.04em}
+.field{position:fixed;inset:0;z-index:0;background:radial-gradient(60% 50% at 50% 8%, rgba(224,176,32,.10), transparent 70%),radial-gradient(50% 40% at 85% 95%, rgba(255,42,26,.08), transparent 70%),radial-gradient(40% 40% at 12% 88%, rgba(224,176,32,.05), transparent 70%);animation:breathe 14s ease-in-out infinite}
+@keyframes breathe{0%,100%{opacity:.85;transform:scale(1)}50%{opacity:1;transform:scale(1.04)}}
+.grain{position:fixed;inset:0;z-index:1;opacity:.04;pointer-events:none;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E")}
+.wrap{position:relative;z-index:2;height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:24px}
+.back{position:fixed;top:16px;left:18px;z-index:3;font-size:12px;color:#8c8579;text-decoration:none;font-family:'DM Mono',monospace;letter-spacing:.08em}
+.back:hover{color:var(--cream)}
+.hero{text-align:center;position:relative}
+.cherowrap{opacity:0;transform:translateY(-130px);animation:dropin 1s cubic-bezier(.34,1.56,.64,1) .35s forwards}
+.chero{display:block;margin:0 auto 2px;width:clamp(132px,19vw,188px);height:auto;color:var(--cream);filter:drop-shadow(0 6px 16px rgba(0,0,0,.5));animation:bob 4.6s ease-in-out 1.5s infinite;transform-origin:50% 80%}
+@keyframes dropin{0%{opacity:0;transform:translateY(-130px)}60%{opacity:1}100%{opacity:1;transform:translateY(0)}}
+@keyframes bob{0%,100%{transform:translateY(0) rotate(0)}50%{transform:translateY(-8px) rotate(-1.6deg)}}
+.title{font-size:clamp(40px,8vw,92px);font-weight:600;letter-spacing:-.01em;line-height:.95;opacity:0;transform:translateY(14px);animation:up .8s ease .35s forwards}
+.kicker{margin-top:.9rem;font-size:clamp(11px,1.5vw,13px);color:var(--muted);text-transform:uppercase;letter-spacing:.34em;opacity:0;animation:fade .8s ease .7s forwards}
+.tag{margin-top:1.4rem;font-size:clamp(14px,2vw,17px);color:var(--cream2);font-style:italic;opacity:0;animation:fade .8s ease .85s forwards}
+@keyframes up{to{opacity:1;transform:translateY(0)}}
+@keyframes fade{to{opacity:1}}
+.gate{margin-top:2.6rem;opacity:0;transform:translateY(10px);animation:up .7s ease 1.05s forwards;width:min(360px,86vw)}
+.gate form{display:flex;gap:8px;border:1px solid rgba(244,236,221,.18);border-radius:10px;padding:6px;background:rgba(255,255,255,.02);transition:border-color .25s}
+.gate form:focus-within{border-color:rgba(224,176,32,.55)}
+.gate input{flex:1;background:transparent;border:0;outline:0;color:var(--cream);font-size:15px;padding:10px 12px;font-family:'DM Mono',monospace;letter-spacing:.12em}
+.gate input::placeholder{color:#6a655b;letter-spacing:.04em}
+.gate button{background:var(--cream);color:var(--ink);border:0;border-radius:7px;padding:0 18px;font-weight:600;font-family:'DM Mono',monospace;font-size:13px;cursor:pointer;transition:transform .12s,background .2s}
+.gate button:hover{transform:translateY(-1px);background:#fff}
+.hint{margin-top:.7rem;font-size:11px;color:#6a655b;text-align:center}
+.err{color:var(--red)!important}
+.shake{animation:shake .4s}@keyframes shake{0%,100%{transform:translateX(0)}20%,60%{transform:translateX(-7px)}40%,80%{transform:translateX(7px)}}
+.picker{display:none;text-align:center;width:min(760px,92vw)}
+.picker.show{display:block}
+.pk-head{font-size:clamp(22px,4vw,34px);font-weight:500;opacity:0;animation:up .7s ease .05s forwards}
+.pk-sub{margin-top:.5rem;color:var(--muted);font-size:13px;letter-spacing:.05em;opacity:0;animation:fade .7s ease .25s forwards}
+.tiles{margin-top:2.2rem;display:grid;grid-template-columns:1fr 1fr;gap:16px}
+@media(max-width:560px){.tiles{grid-template-columns:1fr}}
+@media(max-width:560px),(max-height:680px){body{overflow:auto}.wrap{height:auto;min-height:100%;justify-content:flex-start;padding:56px 18px 40px}.gate{margin-top:2rem}.picker{margin:0 auto}.tiles{margin-top:1.6rem}.foot{position:static;margin-top:28px}}
+.tile{position:relative;display:block;text-decoration:none;color:var(--cream);border:1px solid var(--line);border-radius:14px;padding:28px 24px 22px;background:var(--card);overflow:hidden;opacity:0;transform:translateY(16px);transition:transform .3s cubic-bezier(.2,.7,.2,1),border-color .3s,box-shadow .3s}
+.tile:nth-child(1){animation:up .6s ease .35s forwards}.tile:nth-child(2){animation:up .6s ease .48s forwards}.tile:nth-child(3){animation:up .6s ease .60s forwards}.tile:nth-child(4){animation:up .6s ease .72s forwards}.tile:nth-child(5){animation:up .6s ease .84s forwards}.tile:nth-child(6){animation:up .6s ease .96s forwards}
+.tile.churnd .wm{align-items:center}
+.churnd-wm{font-family:'Lora',Georgia,serif;font-style:italic;font-weight:600;font-size:46px;color:var(--ac);line-height:1}
+.tile:hover{transform:translateY(-6px);border-color:var(--ac);box-shadow:0 18px 50px -22px var(--glow)}
+.tile .wm{height:74px;display:flex;align-items:flex-end;justify-content:flex-start}
+.tile .wm svg{height:100%;width:auto;max-width:100%;fill:var(--ac)}
+.tile.aiko .wm svg{height:54px}
+.tile .meta{margin-top:20px;display:flex;justify-content:space-between;align-items:baseline}
+.tile .nm{font-size:13px;letter-spacing:.06em;color:var(--cream2)}
+.tile .go{font-size:12px;color:var(--ac);opacity:0;transform:translateX(-6px);transition:.3s}
+.tile:hover .go{opacity:1;transform:translateX(0)}
+.tile .edge{position:absolute;left:0;top:0;height:100%;width:3px;background:var(--ac);transform:scaleY(0);transform-origin:top;transition:transform .35s}
+.tile:hover .edge{transform:scaleY(1)}
+.cap{--ac:var(--red);--glow:rgba(255,42,26,.5)}.aiko{--ac:var(--gold);--glow:rgba(224,176,32,.5)}.churnd{--ac:#ED1C24;--glow:rgba(237,28,36,.5)}.drinks{--ac:#A8D93A;--glow:rgba(168,217,58,.5)}.capsur{--ac:#E8382F;--glow:rgba(232,56,47,.5)}.capahm{--ac:#F0616B;--glow:rgba(240,97,107,.5)}
+.drinks-wm{display:flex;align-items:center;gap:9px;color:var(--ac)}
+.drinks-wm svg{width:34px;height:34px}
+.drinks-wm b{font-family:'Lora',Georgia,serif;font-style:italic;font-weight:600;font-size:38px;line-height:1}
+.foot{position:fixed;bottom:16px;left:0;right:0;text-align:center;font-size:11px;color:#544f47;z-index:2;letter-spacing:.05em}
+.logout{position:fixed;top:16px;right:18px;z-index:3;font-size:11px;color:#6a655b;background:none;border:0;cursor:pointer;font-family:'DM Mono',monospace;letter-spacing:.08em;display:none}
+.logout.show{display:block}
+
+.ember{position:fixed;z-index:0;width:42vmax;height:42vmax;border-radius:50%;filter:blur(90px);opacity:.14;pointer-events:none}
+.ember.a{background:var(--gold);top:-18vmax;left:-12vmax;animation:drift1 26s ease-in-out infinite}
+.ember.b{background:var(--red);bottom:-20vmax;right:-14vmax;animation:drift2 32s ease-in-out infinite}
+@keyframes drift1{0%,100%{transform:translate(0,0) scale(1)}50%{transform:translate(9vmax,6vmax) scale(1.15)}}
+@keyframes drift2{0%,100%{transform:translate(0,0) scale(1)}50%{transform:translate(-8vmax,-7vmax) scale(1.1)}}
+.tile .sheen{position:absolute;inset:0;pointer-events:none;background:linear-gradient(105deg,transparent 42%,rgba(244,236,221,.09) 50%,transparent 58%);transform:translateX(-130%)}
+.tile:hover .sheen{animation:sheen .9s ease .05s}
+@keyframes sheen{to{transform:translateX(130%)}}
+.tile:focus-visible{outline:2px solid var(--ac);outline-offset:3px}
+.back:focus-visible{outline:2px solid var(--cream);outline-offset:3px;border-radius:4px}
+@media(prefers-reduced-motion:reduce){
+  .field,.ember{animation:none!important}
+  .tile,.title,.kicker{animation-duration:.01s!important;animation-delay:0s!important}
+  .tile .sheen{display:none}
+}
+</style></head>
+<body>
+<div class="field"></div>
+<div class="ember a"></div><div class="ember b"></div>
+<div class="grain"></div>
+<a class="back mono" href="/">↩ Bookends</a>
+<button class="logout mono" id="logout">lock ↩</button>
+<div class="wrap">
+  <section class="hero" id="hero">
+    <div class="cherowrap"><svg class="chero" viewBox="0 0 220 220" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" aria-label="Chucky">
+      <path d="M58 188 C22 188 24 156 48 158"/>
+      <path d="M70 200 C34 200 36 150 60 128 C72 117 78 116 86 112 C104 124 124 124 142 114 C150 119 160 126 168 138 C190 168 178 201 138 200 C116 200 92 200 70 200 Z"/>
+      <path d="M96 199 q6 6 12 0 M120 199 q6 6 12 0" stroke-width="2.6"/>
+      <path d="M74 70 L68 30 L94 54 C102 50 118 50 126 56 L152 32 L146 74 C156 96 150 120 110 121 C72 121 64 94 74 70 Z"/>
+      <path d="M139 67 L154 58" stroke-width="4"/>
+      <rect x="74" y="64" width="32" height="20" fill="currentColor" stroke="none"/>
+      <rect x="112" y="62" width="28" height="17" fill="currentColor" stroke="none"/>
+      <rect x="103" y="69" width="10" height="5" fill="currentColor" stroke="none"/>
+      <rect x="79" y="78" width="6.5" height="4.5" fill="#15140f" stroke="none"/>
+      <rect x="116" y="74" width="5" height="3.5" fill="#15140f" stroke="none"/>
+      <path d="M106 95 q5 6 10 1" stroke-width="3"/>
+      <path d="M80 85 L56 79 M80 90 L54 91 M82 95 L58 103" stroke-width="2.4"/>
+      <path d="M150 81 L174 75 M150 86 L176 87 M148 91 L172 99" stroke-width="2.4"/>
+    </svg></div>
+    <h1 class="title">Chucky</h1>
+    <div class="kicker mono">Bookends menu editor</div>
+    <p class="tag">Chucky is here to assist you today with menu editing.</p>
+    <div class="gate" id="gate">
+      <form id="gform" autocomplete="off">
+        <input id="pw" type="password" placeholder="passphrase" aria-label="passphrase" spellcheck="false">
+        <button type="submit" class="mono">ENTER</button>
+      </form>
+      <div class="hint mono" id="hint">Bookends R&amp;D · staff access</div>
+    </div>
+  </section>
+  <section class="picker" id="picker">
+    <h2 class="pk-head">Which menu are you editing today?</h2>
+    <div class="pk-sub mono">Pick a brand to open its editor</div>
+    <div class="tiles">
+      <a class="tile cap" href="/capiche/">
+        <span class="edge"></span><span class="sheen"></span>
+        <div class="wm"><svg viewBox="0 0 530.34 177.41" xmlns="http://www.w3.org/2000/svg"><g><path d="M513.92,1.93s-21.75-.9-21.75,22.2,4.3,23.95,3.81,48.21c-.28,14.15-7.2,34.8,3.72,34.81,12.26.01,29.93-66.17,30.58-80.64.65-14.52-4.14-24.58-16.36-24.58Z"/><ellipse cx="496.47" cy="126.03" rx="13.37" ry="11.57" transform="translate(-11.19 194.2) rotate(-21.89)"/><path d="M482.16,88.97c-3.3-2.13-5.27,3.08-7,5.07-5.25,6.04-13.48,9.14-21.44,8.23-4.35-.5-7.99-2.49-10-6.45,12.06-.1,31.4-6.07,34.16-20.19,2.98-15.24-7.58-23.22-21.95-22.29-12.19.8-21.33,5.26-29.79,13.36-11.52,11.03-15.26,27.89-16.15,32.86-.06.33-.54.34-.6,0-2.11-11.76,10.8-39.19-9.79-43.63-21.48-4.63-39.54,25.02-39.54,25.02,8.04-20.82,12.72-28.93,11.81-59.74-.34-11.47-8.78-18.97-18.09-20.59-9.31-1.62-9.17,14.55-9.17,14.55,0,0-1.9,34.85-6.09,51.55-3.64,14.52-8.32,23.55-25.37,28.93-12.61,3.98-17.85-2.28-18.72-7.61-1.7-10.37,9.2-19.22,17.04-13.77,7.21,5,15.53.01,16.53-8.86,2.09-18.61-21.96-11.25-28.03-7.29-20.01,13.06-17.33,34.17-26.22,33.12-2.62-.31-9.02-2.99-2.31-16.1,3.7-7.28,10.72-18.7,2.09-17.98-6.15.56-20.09,24.32-24.19,31.53-.23.4-.82.14-.73-.31,5.83-29.6-12.93-34.9-21.37-35.12-10.69-.29-19.3,7.09-21.05,8.57-.14.12-.33-.06-.27-.24,1.39-4.47-2.71-4.72-6.03-4.94-4.64-.3-7.48,2.12-11.33,12.25-5.45,14.31-9.36,26.84-10.34,30.04-.15.49-.67.75-1.17.6-8.93-2.71,5.19-28.42,6.68-38.43.32-2.14-.85-4.35-5.11-4.35-8.43,0-10.88,3.9-11.48,5.26-.07.16-.3.17-.38.01-.94-1.86-5.32-8.79-18.19-8.79-35.12,0-48.09,26.63-48.48,27.43-1.25-6.92-4.91-12.46-11.01-15.01-18.1-7.56-27.34,7.6-36.13,12.12-24.9,12.78-33.22-14.64-26.22-33.93,8.66-23.87,36.57-30.91,40.76-24.46,3.1,4.78-9.13,11.13-4.41,23.36,4.19,10.85,31.64,8.76,35.58-11.35,5.12-26.11-31.19-49.86-72.6-10.69C-12.81,57.51-9.85,138.64,46.12,136.4c24.44-.98,40.71-14.05,48.69-28.81-.03.78-.06,1.55-.08,2.3.46,32.08,41.46,35.43,62.48,7.05.36-.49,1.13-.13.98.47-3.87,15.07,9.74,16.92,17.46,3.1.19-.34.74.09.58.45-10.72,23.52-25.23,55.69-4.52,56.46,20.65.77,24.35-39.33,23.72-56.41-.02-.49.87-.93.91-.44,1.4,17.92,37.73,17.64,44.44-4.18l.57.08c.25,22.8,30.35,25.51,42.68,10.01h.4c16.78,21.31,38.63,1.65,42.77-2.03.16-.15.41.01.35.22-.92,3.06-.88,11.3,15.5,11.56,19.51.32,36.83-32.88,36.83-32.88,0,0-8.96,18.83,8.39,29.68,4.94,3.09,9.83,3.68,14.43,2.83,6.76-1.25,9.02-6.64,11.09-13.1.08-.26.44-.29.56-.04,3.22,6.85,11.97,11.97,20.37,13.21,20.37,3,31.51-11.55,40.61-26.99,1.92-3.25,6.33-11.41,7.61-14.79.64-1.7,1.01-4.01-.78-5.17ZM453.35,70.97c2.68.55,3.56,5.1,3.07,7.36-.94,4.37-8.52,4.34-11.97,4.38.27-4.9,2.41-13.07,8.9-11.74ZM145.3,78.83c-.32,4.89-4.54,10.33-11.57,11.96-4.77,1.11-7.87-1-6.89-5.55,1.03-4.79,8.09-14.42,12.99-14.42s5.73,4.06,5.47,8ZM219.95,91.53c-2.09.8-6.66.08-7.28-5.19-.9-7.63,4.25-12.78,9.09-14.69,6.32-2.49,7.26,3.59,7.28,5.93.06,8.09-5.2,12.46-9.08,13.95Z"/><path d="M284.2,36.21c0,7.97-5.54,14.75-13.66,16.78-2.14.53-12.72,3.67-14.12-6.95-.99-7.5,4.99-14.9,11.94-17.71,7.94-3.21,15.84,0,15.84,7.88Z"/></g></svg></div>
+        <div class="meta"><span class="nm mono">Italian pizzeria · 4 outlets</span><span class="go mono">open →</span></div>
+      </a>
+      <a class="tile aiko" href="/aiko/">
+        <span class="edge"></span><span class="sheen"></span>
+        <div class="wm"><svg viewBox="0 0 543.63 300" xmlns="http://www.w3.org/2000/svg" aria-label="Aiko"><path d="M156.35,188.95v-.02c-11-40.33-19.47-67.67-25.16-81.27l-.1-.23c-.53-1.15-2.27-5.82-8.06-24.14-4.46-14.11-7.24-23.35-8.26-27.46l-.07-.26c-2.38-8.33-5.69-15.46-9.84-21.2-5.21-7.19-10.68-10.68-16.71-10.68-3.06,0-7.6,1.07-11.83,6.18-2.65,3.05-4.54,7.86-6.15,15.59-5.93,28.59-13.01,54.88-21.05,78.14-25.38,75.21-27.06,81.53-27.17,83.63-1.69,2.35-4.51,9.34-15.82,46.94-4.12,13.51-6.13,23.3-6.13,29.92,0,3.38.5,6.21,1.5,8.57,1.3,3.33,4.74,7.3,13.74,7.3,6.65,0,11.55-1.67,14.98-5.1,2.21-2.21,4.8-6.13,12.16-29.48,7.55-23.53,11.48-35.82,11.98-37.55,4.17-13.8,4.51-16.3,4.51-17.95,0-.51.09-1.32.91-2.48.18-.26.33-.44.43-.56,11.44-2.38,21.91-5.02,31.07-7.86,9.19-2.73,12.89-4.28,14.87-5.85,1.75-.15,3.94-1.04,12.62-5.93.76-.43,1.47-.82,2.14-1.2.88,2.91,2.09,7.19,3.71,13.47,3.74,14.55,7.89,29.66,12.32,44.91,6.39,22,10.13,27.22,14.78,29.18.42.17.85.31,1.29.41,3.62.79,7.11.35,10.15-1.28,2.43-1.17,6.37-4.3,6.37-12.17,0-3.73-.11-7.36-.33-10.69-.47-10.55-4.67-30.48-12.83-60.93ZM108.94,148.62c-1.21.55-2.6,1.29-4.25,2.24-1.4.82-2.17,1.13-2.49,1.24-1.77.04-4.31.54-18.24,7.17-4.67,2.19-8.65,4.03-11.9,5.51.53-2.18,1.19-4.61,1.97-7.28,6.59-22.57,12.62-45.11,17.95-67.07.27.91.57,1.92.91,3.05,2.06,6.97,3.5,11.77,4.54,15.08,7.34,24.08,10.31,35.06,11.51,40.06Z"/><path d="M281.19,142.3c.21-4.58.44-12.87.7-25.35.24-12.09.52-23.95.83-35.27.29-11.1.62-21.17.97-29.94.63-16.23.84-26.53.64-31.51-.28-6.95-1.84-11.51-4.88-14.35-3.08-2.89-6.75-4.76-10.9-5.56-.24-.05-.48-.09-.7-.12-7.69-1.2-10.63,3.09-11.57,5.11-2.01,3.94-3.39,7.86-4.12,11.66-.88,4.59-1.74,14.29-2.64,29.6-6.12,77.73-10.13,135.24-11.92,170.87-2.04,29.15-3.77,36.9-1.87,47.38,0,1.2.08,3.44.24,7.86.25,7.05.89,10.6,2.35,13,1.8,3.14,5.1,5.19,9.81,6.09.32.06.64.12.96.17.48.08.96.14,1.43.19,4.84.49,8.94-.49,12.21-2.93,3.4-2.41,5.62-6.59,6.8-12.79.1-.54.34-2.07,1.9-13.42l3.37-23.07,2.11-.46c8.87-1.84,17.69-2.89,26.22-3.13,8.74-.24,23.24.48,43.04,2.12l22.49,1.65c2.02.15,4.04-.54,5.54-1.89l5.03-4.5c4.7-3.97,7.63-8.88,8.72-14.59,1.2-6.3-1.4-9.79-3.08-11.33-2.17-2.04-4.74-4.36-45.4-12.12-7.44-1.42-13.92-2.57-19.28-3.41-4.03-.63-7.53-1.11-10.41-1.42.25-.32.5-.66.76-1,4-4.77,7.75-9.59,11.14-14.35l.07-.1c4.34-6.31,5.76-7.77,6.01-8,.21-.2.4-.4.58-.62,4.49-5.38,11.08-14.75,20.15-28.66,9.07-13.91,14.21-22.49,16.15-26.96.61-1.22,1.07-2.62,1.38-4.28,1.07-5.63-.73-9.42-2.43-11.6-2.24-2.89-5.65-4.79-10.12-5.64l-1.82-.34c-.11-.02-.22-.03-.33-.04-5.18-.58-9.94,1.23-13.36,5.12-2.01,2.28-8.73,11.07-21.22,27.75-11.05,15.09-20.33,26.77-27.55,34.7-4.04,4.34-5.67,7.51-8.9,11.09.06-3.07-.17-7.38,0-12.02"/><path d="M543.62,177.39c-.31-19.46-2.67-37.6-7.02-53.89-2.91-10.96-7.49-22.33-13.61-33.8-6.37-11.96-12.23-20.09-17.83-24.82-3.83-3.4-9.67-6.53-17.86-9.57-5.85-2.18-10.62-3.43-14.61-3.83h0s-.51-.06-.51-.06c-7.56-.76-17.96,1.26-31.82,6.17-14.14,5.01-23.71,10.11-29.25,15.59-9.42,9.22-17.65,23.17-24.45,41.46-3.67,9.87-5.86,18.81-6.51,26.68-1.82,25.71,5.39,53.65,21.45,83.02l.05.1c11.22,19.85,23.49,33.14,36.45,39.5l.17.08c5.39,2.49,8.75,3.97,10.58,4.65,4.14,1.54,8.37,2.54,12.59,2.96,8.21.83,16.58-.48,24.88-3.9,15.77-6.57,19.82-8.18,20.79-8.53l.16-.06c8.56-3.32,14.06-6.57,17.32-10.24,3.1-3.5,6.23-9.75,10.15-20.28,6.07-16.3,9.06-33.53,8.88-51.23ZM477.88,234.54c-.11-.08-.22-.16-.33-.23-.78-.66-1.65-1.17-2.61-1.52-3.37-1.25-7.02-1.16-10.51.27-1.72.7-3.2,1.63-4.43,2.78-2.1-.81-3.88-1.8-5.31-2.95-.12-.1-.24-.19-.36-.27-1.56-1.1-4.72-3.85-10.94-10.68-5.39-5.92-7.14-8.2-7.66-8.93-1.18-3.41-3.18-5.33-4.94-6.41-.68-1.12-2.43-4.39-5.81-12.84-4.8-11.98-6.26-18.09-6.64-21.1-1.97-15.8.37-32.79,6.97-50.51,2.17-5.84,4.61-10.75,7.23-14.57,7.05-9.97,11.92-14.12,14.76-15.84,3.8-2.31,9.16-3.45,15.94-3.38,4.83.05,9.59.94,14.2,2.66,10.11,3.76,17.46,10.62,22.52,21.04,1.72,3.44,3.62,9.16,5.65,17,2.03,7.87,3.27,14.17,3.68,18.72.91,15.39.7,29.21-.62,41.06v.11c-.59,5.97-2.81,14.18-6.61,24.4-3.57,9.59-5.85,13.37-6.82,14.69-2.21,2.81-5.05,4.84-8.68,6.19-3.18,1.18-5.8,1.41-7.92.62-.41-.15-.66-.26-.77-.32Z"/><path d="M220.46,183.36c-.11-3.36-.23-22.29-.23-65.6v-34.77c0-24.78-.39-30.74-.67-33.05-.29-2.67-1.46-6.56-5.38-9.97-3.42-3.08-7.05-4.63-10.8-4.63-7.82,0-13.38,4.66-15.63,13.08-.52,1.75-1.49,5-3.56,56.44-.97,24.03-1.16,44.63-1.35,64.56-.07,7.99-.14,15.53-.26,23.2-.31,18.52-.63,37.52-.63,38.22,0,11.79.14,17.61,3.23,21.04,3.04,3.36,6.95,5.14,11.31,5.14,2.91,0,6.78-.78,11.85-2.38,7.07-2.39,8.78-5.74,10.27-9.87.1-.29.19-.58.26-.88.39-1.73.8-5.04.8-22.4,0-16.3.48-25.47.76-30.94.21-4.04.31-5.95.02-7.19Z"/></svg></div>
+        <div class="meta"><span class="nm mono">Pan-Asian · Surat &amp; Ahmedabad</span><span class="go mono">open →</span></div>
+      </a>
+      <a class="tile churnd" href="/churnd/">
+        <span class="edge"></span><span class="sheen"></span>
+        <div class="wm"><span class="churnd-wm">Churn'd</span></div>
+        <div class="meta"><span class="nm mono">Ice cream · Ahmedabad</span><span class="go mono">open →</span></div>
+      </a>
+      <a class="tile drinks" href="/drinks/">
+        <span class="edge"></span><span class="sheen"></span>
+        <div class="wm"><span class="drinks-wm"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M5 3h14l-6 8v7"/><path d="M9 18h6"/><path d="M7.5 6h9"/></svg><b>Drinks</b></span></div>
+        <div class="meta"><span class="nm mono">Aiko · Mocktails &amp; sodas</span><span class="go mono">open →</span></div>
+      </a>
+      <a class="tile capsur" href="/capiche-surat/">
+        <span class="edge"></span><span class="sheen"></span>
+        <div class="wm"><span class="drinks-wm"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M5 3h14l-6 8v7"/><path d="M9 18h6"/><path d="M7.5 6h9"/></svg><b>Drinks</b></span></div>
+        <div class="meta"><span class="nm mono">Capiche Surat · Drinks</span><span class="go mono">open →</span></div>
+      </a>
+      <a class="tile capahm" href="/capiche-ahm/">
+        <span class="edge"></span><span class="sheen"></span>
+        <div class="wm"><span class="drinks-wm"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M5 3h14l-6 8v7"/><path d="M9 18h6"/><path d="M7.5 6h9"/></svg><b>Drinks</b></span></div>
+        <div class="meta"><span class="nm mono">Capiche Ahmedabad · Drinks + Coffee</span><span class="go mono">open →</span></div>
+      </a>
+    </div>
+  </section>
+</div>
+<div class="foot mono">CHUCKY v1 — byte-level menu editor · Bookends Pvt Ltd</div>
+<script>
+const PWHASH="f76660f75ff19a500e061678a57a50c9ad0bba521cb5a2b7d91733c6dbb55855";
+const $=s=>document.querySelector(s);
+async function sha256(t){const b=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(t));return [...new Uint8Array(b)].map(x=>x.toString(16).padStart(2,'0')).join('');}
+function reveal(){ $('#hero').style.display='none'; $('#picker').classList.add('show'); $('#logout').classList.add('show'); }
+if(sessionStorage.getItem('galley_auth')==='1'){ reveal(); }
+$('#gform').addEventListener('submit',async e=>{
+  e.preventDefault();
+  const h=await sha256($('#pw').value.trim());
+  if(h===PWHASH){ sessionStorage.setItem('galley_auth','1'); $('#gate').style.transition='opacity .3s';$('#gate').style.opacity='0'; setTimeout(reveal,260); }
+  else{ const g=$('#gform'); g.classList.remove('shake'); void g.offsetWidth; g.classList.add('shake'); const hint=$('#hint'); hint.textContent='Wrong passphrase — try again'; hint.classList.add('err'); $('#pw').select(); }
+});
+$('#logout').addEventListener('click',()=>{ sessionStorage.removeItem('galley_auth'); location.href='/'; });
+const CHUCKY_GREET=["How can I help you today, you non-skilled human?","Oh. It's you again. Let's fix this menu.","I brought the shades. You bring the typos.","Menus don't edit themselves. With me, basically they do.","Try not to break anything. I'm watching. 😎","Another day, another menu you need me for.","Point. Click. Let me carry you.","90% attitude, 10% PDF surgeon. Let's go.","You + me + this menu = unfair advantage.","Cleaner. Shorter. Better. Sound familiar?","Cool cats edit fast. Try to keep up.","I've seen worse menus. Barely.","Ready when you are, slowpoke.","I do the hard part. You take the credit.","Sit. Stay. Watch a professional work.","Hope you brought snacks. This'll take you a while.","Relax, human. The cat's got it."];
+(function(){const n=new Date();const day=Math.floor(new Date(n.getFullYear(),n.getMonth(),n.getDate()).getTime()/86400000);let c=+(sessionStorage.getItem('chucky_visits')||0);sessionStorage.setItem('chucky_visits',c+1);const i=((day*5+c)%CHUCKY_GREET.length+CHUCKY_GREET.length)%CHUCKY_GREET.length;const t=document.querySelector('.tag');if(t)t.textContent=CHUCKY_GREET[i];})();
+
+// pointer-tracked tilt — same feel as the Bookends dashboard
+(function(){
+  if(matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  if(matchMedia('(hover: none)').matches) return;
+  document.querySelectorAll('.tile').forEach(t=>{
+    let raf=0;
+    t.addEventListener('pointermove',e=>{
+      cancelAnimationFrame(raf);
+      raf=requestAnimationFrame(()=>{
+        const r=t.getBoundingClientRect();
+        const px=(e.clientX-r.left)/r.width-.5, py=(e.clientY-r.top)/r.height-.5;
+        t.style.transform='translateY(-6px) rotateX('+(-py*5).toFixed(2)+'deg) rotateY('+(px*6).toFixed(2)+'deg)';
+      });
+    });
+    t.addEventListener('pointerleave',()=>{ cancelAnimationFrame(raf); t.style.transform=''; });
+  });
+})();
+</script></body></html>

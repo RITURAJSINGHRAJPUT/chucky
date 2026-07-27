@@ -1,0 +1,22 @@
+# deps (reinstall with `npm install`)
+node_modules/
+
+# wrangler local state / cache
+deploy/.wrangler/
+.wrangler/
+
+# OS / editor cruft
+.DS_Store
+*.swp
+*~
+
+# local secrets — never commit real tokens (see HANDOFF.md)
+.env
+.dev.vars
+*.token
+
+# scratch renders (safe to delete)
+/tmp_render/
+
+# Local Netlify folder
+.netlify

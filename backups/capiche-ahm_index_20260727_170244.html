@@ -1,0 +1,1303 @@
+<!doctype html><html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Capiche Ahmedabad · Drinks Editor</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Lora:ital,wght@0,400;0,500;0,600;1,400&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root{
+  --ink:#0E0D0B;--panel:#161410;--card:#1E1B15;--card2:#242017;
+  --cream:#F4ECDD;--cream-dim:#CFC6B4;--muted:#8F8676;
+  --line:rgba(244,236,221,.10);--line2:rgba(244,236,221,.17);
+  --red:#A8D93A;--aiko:#A8D93A;--aiko-soft:rgba(168,217,58,.14);--aiko-line:rgba(168,217,58,.45);
+  --ok:#5FB07C;--warn:#E0912B;--bad:#E5675E;
+  --paper:#F6EFE2;
+  --serif:'Lora',Georgia,serif;--mono:'DM Mono',ui-monospace,Menlo,Consolas,monospace;
+}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{margin:0;background:var(--ink);color:var(--cream);font-family:var(--mono);font-size:14px;line-height:1.45;-webkit-font-smoothing:antialiased;overflow:hidden}
+button{font:inherit;color:inherit;background:none;border:none;cursor:pointer}
+::selection{background:var(--aiko);color:#1a1400}
+#boot{position:fixed;inset:0;z-index:100;background:var(--ink);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px}
+#boot svg{color:var(--aiko)!important;fill:var(--aiko)!important}
+#boot .s{color:var(--muted);font-family:var(--mono);font-size:13px;letter-spacing:.4px}
+.spin{width:26px;height:26px;border:3px solid var(--line2);border-top-color:var(--aiko);border-radius:50%;animation:sp .8s linear infinite}
+@keyframes sp{to{transform:rotate(360deg)}}
+
+/* ---- top bar ---- */
+header.bar{display:flex;align-items:center;gap:16px;padding:10px 18px;border-bottom:1px solid var(--line);background:linear-gradient(180deg,#141209,#100E09);position:relative;z-index:20}
+.home{width:34px;height:34px;flex:none;display:grid;place-items:center;border-radius:8px;color:var(--muted);border:1px solid var(--line2);font-size:15px;text-decoration:none}
+.home:hover{color:var(--cream);border-color:var(--aiko-line)}
+.brand{display:flex;align-items:center;gap:11px}
+.brand .wm{height:30px;width:auto;color:var(--aiko)}
+.brand .tag{font-size:10.5px;color:var(--muted);letter-spacing:.2em;text-transform:uppercase}
+.homelink{display:flex;align-items:center;gap:6px;text-decoration:none;color:var(--muted);margin-right:2px}
+.homelink:hover{color:var(--cream)}
+.homelink:hover .chucky{transform:translateY(-2px)}
+.homelink .chucky{width:30px;height:30px;color:var(--aiko);transition:transform .2s}
+.homelink .bhint{font-size:14px}
+.homelink .ctag{display:none}
+.search{flex:1;max-width:340px;display:flex;align-items:center;gap:8px;background:#100E09;border:1px solid var(--line2);border-radius:9px;padding:7px 11px;transition:.15s}
+.search:focus-within{border-color:var(--aiko-line)}
+.search svg{width:15px;height:15px;color:var(--muted);flex:none}
+.search input{flex:1;background:none;border:none;outline:none;color:var(--cream);font-family:var(--mono);font-size:13px}
+.search input::placeholder{color:var(--muted)}
+.search kbd{font-family:var(--mono);font-size:10px;color:var(--muted);border:1px solid var(--line2);border-radius:4px;padding:1px 5px;background:#0d0b07}
+.spacer{flex:1}
+.pill{font-size:12px;font-weight:600;letter-spacing:.02em;padding:6px 12px;border-radius:999px;border:1px solid;display:inline-flex;align-items:center;gap:7px;font-family:var(--mono)}
+.pill::before{content:"";width:7px;height:7px;border-radius:50%;background:currentColor}
+.pill.ok{color:var(--ok);border-color:rgba(95,176,124,.4);background:rgba(95,176,124,.08)}
+.pill.bad{color:var(--bad);border-color:rgba(229,103,94,.45);background:rgba(229,103,94,.1)}
+.pill.warn{color:#E0A33E;border-color:rgba(224,163,62,.45);background:rgba(224,163,62,.1)}
+#savemenu{background:transparent;color:var(--cream);border:1px solid var(--line2);font-weight:600;letter-spacing:.03em;padding:9px 15px;border-radius:9px;font-size:13px;transition:.15s;margin-right:8px}
+#savemenu:hover{border-color:var(--aiko-line);color:var(--aiko)}
+#savemenu:disabled{opacity:.6;cursor:default}
+#export{background:var(--aiko);color:#1a1400;font-weight:700;letter-spacing:.03em;padding:9px 16px;border-radius:9px;font-size:13px;transition:.15s}
+#export:hover{filter:brightness(1.07);transform:translateY(-1px)}
+#export:disabled{opacity:.4;cursor:not-allowed;transform:none;filter:none}
+.prevtoggle{display:none;align-items:center;gap:7px;font-size:12.5px;color:var(--cream-dim);border:1px solid var(--line2);border-radius:9px;padding:8px 13px}
+.prevtoggle:hover{border-color:var(--aiko-line);color:var(--cream)}
+
+/* ---- layout ---- */
+main.app{display:grid;grid-template-columns:210px 1fr minmax(400px,560px);height:calc(100dvh - 55px)}
+.rail{border-right:1px solid var(--line);background:var(--panel);padding:14px 12px;overflow-y:auto;display:flex;flex-direction:column;gap:3px}
+.rail .tabs{display:flex;gap:4px;background:#100E09;border:1px solid var(--line2);border-radius:9px;padding:3px;margin-bottom:12px}
+.rail .tabs button{flex:1;font-size:12px;color:var(--muted);padding:6px 8px;border-radius:6px;transition:.13s}
+.rail .tabs button.on{background:var(--aiko-soft);color:var(--cream)}
+.rail .lbl2{font-size:10px;letter-spacing:.2em;text-transform:uppercase;color:var(--muted);padding:2px 10px 8px}
+.sec{display:flex;align-items:center;justify-content:space-between;gap:8px;width:100%;text-align:left;padding:9px 11px;border-radius:8px;color:var(--cream-dim);font-size:12.5px;letter-spacing:.02em;transition:.13s;position:relative}
+.sec:hover{background:rgba(255,255,255,.035);color:var(--cream)}
+.sec.on{background:var(--aiko-soft);color:var(--cream)}
+.sec.on::before{content:"";position:absolute;left:0;top:8px;bottom:8px;width:2.5px;border-radius:2px;background:var(--aiko)}
+.sec .ct{font-size:11px;color:var(--muted);font-variant-numeric:tabular-nums;background:#0d0b07;border:1px solid var(--line);border-radius:20px;padding:1px 8px;min-width:24px;text-align:center}
+.sec.on .ct{color:var(--aiko);border-color:var(--aiko-line)}
+
+#editor{overflow-y:auto;padding:20px 24px 70px}
+.grouphd{font-size:11px;letter-spacing:.18em;text-transform:uppercase;color:var(--muted);padding:14px 2px 8px;scroll-margin-top:14px}
+.grouphd.sechd{font-family:var(--serif);font-size:22px;letter-spacing:.2px;text-transform:none;color:var(--cream);border-top:1px solid var(--line);margin-top:10px;padding-top:20px;display:flex;align-items:baseline;gap:10px}
+.grouphd.sechd .n{font-size:12px;font-family:var(--mono);color:var(--muted);letter-spacing:.02em}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px 16px;margin-bottom:11px;transition:border-color .15s,box-shadow .15s}
+.card:hover{border-color:var(--line2)}
+.card:focus-within{border-color:var(--aiko-line);box-shadow:0 0 0 1px var(--aiko-line)}
+.card.haswarn{border-color:rgba(224,145,43,.5)}
+.nrow{display:flex;align-items:flex-start;gap:12px}
+.name{flex:1;min-width:0;font-family:var(--mono);font-weight:700;font-size:16px;letter-spacing:.4px;color:var(--cream);text-transform:uppercase;outline:none;border-radius:5px;padding:3px 5px;margin:-3px -5px}
+.name:focus{background:rgba(233,184,51,.09);box-shadow:inset 0 0 0 1px var(--aiko-line)}
+.prices{display:flex;gap:6px;flex:none}
+.pwrap{display:flex;align-items:center}
+.price{width:66px;background:#100E09;border:1px solid var(--line2);border-radius:7px;color:var(--cream);font-family:var(--mono);font-size:15px;font-weight:600;text-align:right;padding:6px 9px;outline:none;font-variant-numeric:tabular-nums}
+.price:focus{border-color:var(--aiko-line)}
+.price.err{border-color:var(--bad);background:#fff6f6;color:#1a1400}
+.rm{flex:none;width:30px;height:30px;border-radius:7px;color:var(--muted);display:grid;place-items:center;font-size:15px;transition:.13s}
+.rm:hover{color:var(--bad);background:rgba(229,103,94,.1)}
+.desc{font-size:12.5px;color:var(--cream-dim);margin-top:8px;outline:none;border-radius:5px;padding:4px 6px;margin-left:-6px;margin-right:-6px;line-height:1.5;max-width:58ch}
+.desc:focus{background:rgba(233,184,51,.07);box-shadow:inset 0 0 0 1px var(--aiko-line)}
+.metarow{display:flex;align-items:center;gap:10px;margin-top:10px;flex-wrap:wrap}
+.lbl{font-size:10.5px;color:var(--muted);letter-spacing:.13em;text-transform:uppercase}
+.ctr{font-size:11px;color:var(--muted);font-variant-numeric:tabular-nums}
+.ctr.over{color:var(--bad)}
+.afchk{display:inline-flex;gap:8px!important;flex-wrap:wrap;margin-top:0!important}
+.afchk label{display:inline-flex;align-items:center;gap:6px;padding:5px 11px 5px 9px;border-radius:20px;border:1px solid var(--line2);color:var(--muted);font-size:11.5px;letter-spacing:.02em;background:#100E09;cursor:pointer;transition:.13s;user-select:none}
+.afchk label:hover{color:var(--cream-dim);border-color:var(--line2)}
+.afchk label:has(input:checked){background:var(--aiko-soft);border-color:var(--aiko-line);color:var(--cream)}
+.afchk label:has(input:checked) svg{color:var(--aiko)}
+.afchk input{position:absolute;opacity:0;width:0;height:0;pointer-events:none}
+.afchk label svg{width:15px;height:15px;color:var(--muted)}
+.hint{font-size:11.5px;color:var(--warn);margin-top:8px;min-height:0}
+.hint:empty{display:none}
+.rmstrip{display:flex;align-items:center;gap:12px;padding:11px 14px;border:1px dashed var(--line2);border-radius:10px;margin-bottom:11px;color:var(--muted);font-size:13px}
+.rmname{color:var(--cream-dim);text-transform:uppercase;letter-spacing:.4px}
+.rmtag{font-size:10.5px;color:var(--bad);border:1px solid rgba(229,103,94,.4);border-radius:20px;padding:1px 8px;letter-spacing:.08em;text-transform:uppercase}
+.restore{margin-left:auto;color:var(--aiko);font-size:12px;padding:5px 12px;border:1px solid var(--aiko-line);border-radius:7px;transition:.13s}
+.restore:hover{background:var(--aiko-soft)}
+.sp{text-decoration:underline wavy rgba(229,103,94,.9);text-underline-offset:3px;cursor:pointer}
+.gl{color:var(--bad);text-decoration:underline}
+.addzone{margin-top:4px}
+.addlink,.addopen{width:100%;padding:12px;border:1.5px dashed var(--line2);border-radius:11px;color:var(--muted);font-size:13px;letter-spacing:.03em;transition:.13s;text-align:center}
+.addlink:hover,.addopen:hover{border-color:var(--aiko-line);color:var(--aiko);background:var(--aiko-soft)}
+.addform{background:var(--card2);border:1px solid var(--aiko-line);border-radius:12px;padding:14px;margin-top:8px;display:none;flex-direction:column;gap:10px}
+.addform.open{display:flex}
+.addform input,.addform textarea,.addform select{background:#100E09;border:1px solid var(--line2);border-radius:8px;color:var(--cream);font-family:var(--mono);font-size:13px;padding:8px 10px;outline:none}
+.addform input:focus,.addform textarea:focus,.addform select:focus{border-color:var(--aiko-line)}
+.addform .af-name{font-weight:700;text-transform:uppercase}
+.af-nmeta,.af-dmeta{font-size:11px;color:var(--muted)}
+.af-nmeta.bad,.af-dmeta.bad{color:var(--bad)}
+.afadd{background:var(--aiko);color:#1a1400;font-weight:700;border-radius:8px;padding:9px;transition:.15s}
+.afadd:disabled{opacity:.4;cursor:not-allowed}
+.afcancel{color:var(--muted);font-size:12px;padding:8px}
+.afchk.af-a-row{gap:8px}
+.osel,.af-sec{cursor:pointer}
+/* photo framing */
+.padj{margin-top:10px}
+.pframe{position:relative;overflow:hidden;border:1px solid var(--line2);border-radius:8px;background:#0d0b07;cursor:grab;touch-action:none;user-select:none}
+.pframe.grab{cursor:grabbing;border-color:var(--aiko-line)}
+.pframe img{position:absolute;max-width:none;pointer-events:none}
+.prow{display:flex;align-items:center;gap:8px;margin-top:7px}
+.pzoom{flex:1;accent-color:var(--aiko);height:3px;cursor:pointer}
+.pbtn{font:inherit;font-size:11px;color:var(--muted);background:transparent;border:1px solid var(--line2);border-radius:7px;padding:4px 9px;cursor:pointer}
+.pbtn:hover{color:var(--cream);border-color:var(--aiko-line)}
+.phint{font-size:10.5px;color:var(--muted);margin-top:5px;letter-spacing:.03em}
+.padj{display:flex;align-items:center;gap:10px}
+.pmini{cursor:pointer;flex:none}
+.pmini:hover{border-color:var(--aiko-line)}
+/* crop editor modal */
+.cropov{position:fixed;inset:0;background:rgba(6,5,3,.74);backdrop-filter:blur(3px);display:flex;align-items:center;justify-content:center;z-index:130;padding:20px}
+.cropcard{background:var(--panel);border:1px solid var(--line2);border-radius:16px;padding:18px 18px 16px;box-shadow:0 30px 80px rgba(0,0,0,.6);max-width:94vw}
+.crophd{display:flex;justify-content:space-between;align-items:baseline;gap:16px;font-size:13px;color:var(--cream);margin-bottom:12px;letter-spacing:.02em}
+.crophd span{font-size:10.5px;color:var(--muted);letter-spacing:.03em;text-transform:none}
+.cropstage{position:relative;overflow:hidden;border-radius:10px;background:#0b0a06;cursor:default;touch-action:none;margin:0;box-shadow:inset 0 0 0 1px rgba(255,255,255,.09)}
+.cropstage.grab{cursor:grabbing}
+.cropimg{position:absolute;max-width:none;pointer-events:none;user-select:none;opacity:.5}
+.cropwrap{display:flex;gap:16px;align-items:flex-start;flex-wrap:wrap;justify-content:center}
+.cropbox{position:absolute;box-shadow:0 0 0 9999px rgba(0,0,0,.55);outline:1px solid rgba(255,255,255,.92);box-sizing:border-box;cursor:move;touch-action:none;z-index:2}
+.cropbox .cg{position:absolute;inset:0;pointer-events:none;background-image:linear-gradient(rgba(255,255,255,.34) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.34) 1px,transparent 1px);background-size:33.33% 33.34%;opacity:.5}
+.crophandle{position:absolute;width:15px;height:15px;background:var(--aiko);border:2px solid #1a1400;border-radius:3px;box-sizing:border-box;transform:translate(-50%,-50%);touch-action:none;z-index:3}
+.crophandle.edge{width:12px;height:12px;border-radius:50%}
+.cropside{display:flex;flex-direction:column;gap:7px;align-items:center;padding-top:2px}
+.cropside .rl{font-size:10.5px;color:var(--muted);letter-spacing:.03em}
+.cropresult{position:relative;overflow:hidden;border:1px solid var(--line2);border-radius:8px;background:#0d0b07}
+.cropresult img{position:absolute;max-width:none;pointer-events:none}
+.croprow{display:flex;align-items:center;gap:10px;margin-top:14px}
+.crzoom{flex:1;accent-color:var(--aiko);cursor:pointer;height:3px}
+.cz{color:var(--muted);font-size:15px;width:12px;text-align:center;line-height:1}
+.cropfoot{display:flex;justify-content:flex-end;gap:9px;margin-top:15px}
+.cropbtn{font:inherit;font-size:12.5px;color:var(--cream-dim);background:transparent;border:1px solid var(--line2);border-radius:8px;padding:8px 15px;cursor:pointer;transition:.13s}
+.cropbtn:hover{border-color:var(--aiko-line);color:var(--cream)}
+.cropbtn.save{background:var(--aiko);color:#1a1400;border-color:var(--aiko);font-weight:700}
+.cropbtn.save:hover{filter:brightness(1.06)}
+.cropbtn.ghost{color:var(--muted)}
+/* marker chips (J / dairy / gluten) */
+.markrow{display:flex;align-items:center;gap:7px;margin-top:11px;flex-wrap:wrap}
+.mlbl{font-size:10.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.12em;margin-right:1px}
+.mchip{font:inherit;font-size:12px;color:var(--cream-dim);background:transparent;border:1px solid var(--line2);border-radius:20px;padding:4px 11px;cursor:pointer;transition:.13s;line-height:1.1}
+.mchip:hover{border-color:var(--aiko-line);color:var(--cream)}
+.mchip.on{background:var(--aiko-soft);border-color:var(--aiko-line);color:var(--aiko);font-weight:600}
+
+/* ---- preview ---- */
+#previewPane{border-left:1px solid var(--line);background:var(--panel);display:flex;flex-direction:column;overflow:hidden;position:relative}
+.plabel{display:flex;align-items:center;gap:8px;padding:13px 18px;border-bottom:1px solid var(--line);font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--muted)}
+#ptag{color:var(--cream-dim);letter-spacing:.04em;text-transform:none}
+#wrap{flex:1;overflow:auto;background:#2a2620;padding:16px;display:flex;justify-content:center;align-items:flex-start;position:relative}
+#preview{max-width:100%;height:auto;border-radius:5px;box-shadow:0 20px 50px rgba(0,0,0,.6);background:#fff}
+#busy{position:absolute;top:22px;right:22px;background:rgba(16,14,9,.9);color:var(--cream-dim);font-size:11px;padding:5px 10px;border-radius:20px;display:none}
+#busy.on{display:block}
+.prev-close{display:none;position:absolute;top:11px;right:14px;width:28px;height:28px;border-radius:7px;color:var(--muted);place-items:center;font-size:16px;z-index:2}
+.prev-close:hover{color:var(--cream);background:rgba(255,255,255,.06)}
+
+/* ---- popover (spell) ---- */
+#popover{position:absolute;display:none;z-index:80;background:var(--panel);border:1px solid var(--line2);border-radius:10px;padding:6px;box-shadow:0 16px 40px rgba(0,0,0,.5);min-width:160px}
+#popover .word{font-size:11px;color:var(--muted);padding:4px 8px}
+#popover button{display:block;width:100%;text-align:left;padding:7px 10px;border-radius:6px;color:var(--cream);font-size:13px}
+#popover button:hover{background:var(--aiko-soft)}
+#popover .ignore{color:var(--muted);font-size:12px;border-top:1px solid var(--line);margin-top:4px;padding-top:8px}
+
+/* ---- Chucky + celebrate (restyled, engine drives them) ---- */
+#chuckysay{position:fixed;left:16px;bottom:16px;z-index:60;max-width:300px;background:#100E09;color:var(--cream-dim);font-family:var(--serif);font-style:italic;font-size:13px;line-height:1.4;padding:11px 14px;border-radius:13px;border-bottom-left-radius:3px;border:1px solid var(--line2);box-shadow:0 12px 30px rgba(0,0,0,.4);display:none}
+#chuckysay.on{display:block;animation:sayin .4s cubic-bezier(.2,1.3,.4,1)}
+@keyframes sayin{0%{opacity:0;transform:translateY(8px)}100%{opacity:1;transform:translateY(0)}}
+#celebrate{position:fixed;inset:0;z-index:200;display:none;align-items:center;justify-content:center;background:rgba(10,8,4,.6);backdrop-filter:blur(3px)}
+#celebrate.on{display:flex}
+#celebrate .cbcard{background:var(--panel);border:1px solid var(--aiko-line);border-radius:20px;padding:30px 44px 34px;display:flex;flex-direction:column;align-items:center;gap:8px;box-shadow:0 30px 80px rgba(0,0,0,.6);text-align:center;animation:pop .45s cubic-bezier(.18,1.4,.4,1)}
+@keyframes pop{0%{transform:scale(.6) rotate(-8deg);opacity:0}60%{transform:scale(1.06)}100%{transform:scale(1) rotate(0);opacity:1}}
+#celebrate .cbcat{width:120px;height:120px;color:var(--aiko)}
+#celebrate .cbcat svg{width:100%;height:100%}
+#celebrate .cbline{font-family:var(--mono);font-weight:700;font-size:26px;color:var(--cream);letter-spacing:.5px}
+#celebrate .cbsub{font-size:12px;color:var(--muted)}
+
+.scrim{position:fixed;inset:0;background:rgba(8,6,3,.55);z-index:44;display:none}
+.scrim.on{display:block}
+
+@media(max-width:1120px){ main.app{grid-template-columns:190px 1fr minmax(340px,430px)} }
+/* Tablet: rail moves to a top strip; editor + preview stay side-by-side ON the page. */
+@media(max-width:980px){
+  main.app{grid-template-columns:1fr minmax(300px,400px);grid-template-rows:auto minmax(0,1fr);grid-template-areas:"rail rail" "editor preview"}
+  .rail{grid-area:rail;flex-direction:row;align-items:center;overflow-x:auto;border-right:none;border-bottom:1px solid var(--line);padding:9px 12px;gap:6px}
+  .rail .tabs{margin-bottom:0;flex:none}
+  .rail .lbl2{display:none}
+  .sec{width:auto;flex:none;white-space:nowrap;padding:7px 12px}
+  .sec.on::before{display:none}
+  #editor{grid-area:editor}
+  #previewPane{grid-area:preview}
+  .prevtoggle,.prev-close{display:none!important}
+  .search{max-width:190px}
+}
+/* Phone: stack — preview sits directly below the editor on the same scrolling page. */
+@media(max-width:640px){
+  html,body{height:auto} body{overflow:auto}
+  main.app{display:flex;flex-direction:column;height:auto}
+  #editor{overflow:visible;height:auto;padding-bottom:20px}
+  #previewPane{border-top:1px solid var(--line);height:auto}
+  #wrap{height:70vh}
+  .brand .tag{display:none}.search{max-width:150px}
+}
+@media(prefers-reduced-motion:reduce){*{animation-duration:.01s!important}}
+
+input.name,textarea.name{background:#100E09;border:1px solid var(--line2);font-family:var(--mono);font-weight:700;font-size:16px;letter-spacing:.4px;text-transform:uppercase;color:var(--cream);padding:8px 10px;border-radius:7px;margin:0;flex:1;min-width:120px}
+textarea.name{resize:none;overflow:hidden;line-height:1.25;display:block}
+input.name:focus,textarea.name:focus{border-color:var(--aiko-line);background:#12100a;box-shadow:none;outline:none}
+input.name.err,textarea.name.err{border-color:var(--bad);background:#fff6f6;color:#1a1400}
+input.desc,textarea.desc{width:100%;background:#100E09;border:1px solid var(--line2);color:var(--cream-dim);font-family:var(--mono);font-size:13px;padding:8px 10px;border-radius:7px;margin-top:9px;outline:none}
+textarea.desc{resize:none;overflow:hidden;line-height:1.35;display:block;box-sizing:border-box}
+input.desc:focus,textarea.desc:focus{border-color:var(--aiko-line)}
+input.desc.err,textarea.desc.err{border-color:var(--bad)}
+.warnline{flex-basis:100%;font-family:var(--mono);font-size:11.5px;color:var(--bad);display:flex;gap:10px;align-items:center;margin-top:8px}
+.warnline.soft{color:var(--muted)}
+.warnline .iglink{font:inherit;border:none;background:none;color:var(--muted);text-decoration:underline;cursor:pointer;padding:0}
+#fontnote{position:fixed;left:50%;transform:translateX(-50%) translateY(8px);bottom:18px;background:#2b2416;color:var(--cream);font-family:var(--mono);font-size:12.5px;padding:9px 14px;border-radius:9px;opacity:0;pointer-events:none;transition:.25s;z-index:90}
+#fontnote.on{opacity:1;transform:translateX(-50%) translateY(0)}
+
+.gradrow{display:flex;align-items:center;gap:8px;margin-top:11px;flex-wrap:wrap}
+.gradlbl{font-size:10.5px;color:var(--muted);letter-spacing:.12em;text-transform:uppercase}
+.gradsw{width:74px;height:24px;border-radius:6px;border:1px solid var(--line2);flex:none}
+.gradrow input[type=color]{-webkit-appearance:none;appearance:none;width:26px;height:26px;border:1px solid var(--line2);border-radius:6px;background:none;padding:0;cursor:pointer}
+.gradrow input[type=color]::-webkit-color-swatch-wrapper{padding:2px}
+.gradrow input[type=color]::-webkit-color-swatch{border:none;border-radius:4px}
+.autogr{display:inline-flex;align-items:center;gap:5px;font-size:11.5px;color:#1a1400;background:var(--aiko);border-radius:7px;padding:6px 11px;font-weight:700}
+.autogr:hover{filter:brightness(1.08)}
+.addbtn{width:100%;padding:12px;border:1.5px dashed var(--line2);border-radius:11px;color:var(--muted);font-size:13px;letter-spacing:.03em;transition:.13s;margin:6px 0 4px}
+.addbtn:hover{border-color:var(--aiko-line);color:var(--aiko);background:var(--aiko-soft)}
+.card.addcard{border-color:var(--aiko-line)}
+input.price{width:66px;background:#100E09;border:1px solid var(--line2);border-radius:7px;color:var(--cream);font-family:var(--mono);font-size:15px;font-weight:600;text-align:right;padding:6px 9px;outline:none;font-variant-numeric:tabular-nums}
+input.price:focus{border-color:var(--aiko-line)}
+.vol-wrap{display:inline-flex;align-items:center;gap:4px}
+input.volu{width:48px;background:#100E09;border:1px solid var(--line2);border-radius:7px;color:var(--cream-dim);font-family:var(--mono);font-size:13px;text-align:right;padding:6px 7px;outline:none;font-variant-numeric:tabular-nums}
+input.volu:focus{border-color:var(--aiko-line)}
+.vol-wrap .unit{font-size:11px;color:var(--muted);font-family:var(--mono)}
+</style><style>:root{--aiko:#E8382F}</style></head><body>
+<div id="boot"><div class="spin"></div><div class="s" id="bootmsg">Loading…</div></div>
+<header class="bar">
+  <a class="home" href="/chucky/" title="All editors">↩</a>
+  <span class="mascot" id="mascot"></span>
+  <div class="brand"><b id="brandname">Capiche</b><span class="tag" id="brandsub">Ahmedabad · Drinks</span></div>
+  <div class="search"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg><input id="q" placeholder="Search drinks…" autocomplete="off"></div>
+  <span class="chuckysay-anchor"></span>
+  <div class="pill" id="flagpill">All clear</div>
+  <button class="savebtn" id="savemenu" title="Save this version — it reopens next time with your photos">Save</button>
+  <button class="export" id="export">Export PDF</button>
+</header>
+<main class="app">
+  <aside class="rail" id="rail"><div class="tabs" id="tabs"></div></aside>
+  <section class="editor" id="editor"></section>
+  <div class="previewPane" id="previewPane"><div class="plabel">Live preview <span id="ptag"></span></div><div id="wrap"><canvas id="preview"></canvas><div id="busy"></div></div></div>
+</main>
+<div id="scrim" class="scrim"></div>
+<div id="fontnote"></div>
+<script>
+const { PDFDocument, PDFName, PDFNumber, PDFRawStream } = PDFLib;
+pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+const BRAND={ name:"Capiche", sub:"Ahmedabad · Drinks", pdf:'menu.pdf', download:'Capiche_Ahmedabad_Drinks.pdf', dictKey:'capahm_dict' };
+let FM, doc, pageStreams=[], pdfBytesOrig, lastBytes=null, pdfjsDoc=null, renderToken=0, activePage, ptimer=null;
+let edits={};
+let removed=new Set();   // `${page}:${idx}` of removed drinks
+let added={};            // page -> [{name,desc,price}] new drinks (fill freed slots)
+let photoUploads={};     // drink key -> { name:'/UpN', iw, ih } uploaded photo XObject
+let _upN=0;
+let markerEdits={};      // K0(page,idx) -> [marker types] override (jain/dairy/gluten) for existing drinks
+// Grade an uploaded image to match the dark/warm menu theme (canvas). Returns a themed JPEG.
+async function gradeImage(file){
+  const url=URL.createObjectURL(file);
+  try{
+    const im=await new Promise((res,rej)=>{ const i=new Image(); i.onload=()=>res(i); i.onerror=()=>rej(new Error('img')); i.src=url; });
+    const MAX=900, sc=Math.min(1, MAX/Math.max(im.width,im.height));
+    const cv=document.createElement('canvas'); cv.width=Math.max(1,Math.round(im.width*sc)); cv.height=Math.max(1,Math.round(im.height*sc));
+    const cx=cv.getContext('2d'); if(!cx) throw new Error('nocanvas');
+    cx.filter='brightness(0.86) contrast(1.10) saturate(1.06)'; cx.drawImage(im,0,0,cv.width,cv.height);
+    cx.filter='none'; cx.globalCompositeOperation='overlay'; cx.fillStyle='rgba(120,60,20,0.10)'; cx.fillRect(0,0,cv.width,cv.height);
+    cx.globalCompositeOperation='source-over';
+    const blob=await new Promise(res=>cv.toBlob(res,'image/jpeg',0.85));
+    return { bytes:new Uint8Array(await blob.arrayBuffer()), png:false };
+  } finally { URL.revokeObjectURL(url); }
+}
+// Embed an uploaded image into the PDF + register it on the drink's page, then re-render.
+// Embed raw image bytes into the PDF + register the XObject + set photoUploads[key].
+// `fr` (optional) restores a saved crop {zoom,dx,dy,rot}. Keeps the bytes so they can be persisted.
+async function embedBytes(key, buf, isPng, fr){
+  const img=isPng? await doc.embedPng(buf) : await doc.embedJpg(buf);
+  const nm='/Up'+(_upN++);
+  const mp=+String(key).split(':')[0]; const page=doc.getPage(mp);
+  let res=doc.context.lookup(page.node.get(PDFName.of('Resources')));
+  let xo=res.get(PDFName.of('XObject')); xo = xo? doc.context.lookup(xo) : doc.context.obj({});
+  if(!res.get(PDFName.of('XObject'))) res.set(PDFName.of('XObject'), xo);
+  xo.set(PDFName.of(nm.slice(1)), img.ref);
+  const prev=photoUploads[key]; if(prev&&prev.src){ try{URL.revokeObjectURL(prev.src);}catch(_){} }
+  const src=URL.createObjectURL(new Blob([buf],{type:isPng?'image/png':'image/jpeg'}));
+  photoUploads[key]={ name:nm, iw:img.width, ih:img.height, src, bytes:buf, isPng:!!isPng,
+    zoom:(fr&&fr.zoom)||1, dx:(fr&&fr.dx)||0, dy:(fr&&fr.dy)||0, rot:(fr&&fr.rot)||0 };
+  return photoUploads[key];
+}
+async function embedPhoto(key, file){
+  try{
+    let buf, isPng=false;
+    try{ const g=await gradeImage(file); buf=g.bytes; isPng=g.png; }
+    catch(_){ const raw=new Uint8Array(await file.arrayBuffer()); buf=raw; isPng=(file.type||'').includes('png')||(raw[0]===0x89&&raw[1]===0x50); }
+    const prev=photoUploads[key];
+    await embedBytes(key, buf, isPng, null);
+    try{MEM.tick();}catch(_){}  persistPhotos();
+    buildEditor(); await regenerate(); renderPreview();
+    if(!prev) openCropModal(key);   // first upload -> open the crop editor automatically
+  }catch(e){ console.error('photo embed failed',e); fontNote('couldn’t read that image'); }
+}
+// ---- durable photo storage (IndexedDB): images survive reload / reopen ----
+let _idb=null;
+function idb(){ if(_idb) return _idb; _idb=new Promise((res,rej)=>{ const r=indexedDB.open('chucky_photos',1);
+  r.onupgradeneeded=()=>{ if(!r.result.objectStoreNames.contains('p')) r.result.createObjectStore('p'); };
+  r.onsuccess=()=>res(r.result); r.onerror=()=>rej(r.error); }); return _idb; }
+async function idbSet(k,v){ try{ const db=await idb(); await new Promise((res,rej)=>{ const t=db.transaction('p','readwrite'); t.objectStore('p').put(v,k); t.oncomplete=res; t.onerror=()=>rej(t.error); }); }catch(_){}}
+async function idbGet(k){ try{ const db=await idb(); return await new Promise((res)=>{ const t=db.transaction('p','readonly'); const rq=t.objectStore('p').get(k); rq.onsuccess=()=>res(rq.result); rq.onerror=()=>res(null); }); }catch(_){ return null; }}
+async function idbDel(k){ try{ const db=await idb(); await new Promise((res)=>{ const t=db.transaction('p','readwrite'); t.objectStore('p').delete(k); t.oncomplete=res; t.onerror=res; }); }catch(_){}}
+// serialise the current photos (bytes + crop) under an IDB slot (default = the working "auto" slot)
+async function savePhotosTo(slot){
+  const out={};
+  for(const k in photoUploads){ const u=photoUploads[k]; if(!u||!u.bytes) continue;
+    out[k]={ bytes:u.bytes, isPng:u.isPng, zoom:u.zoom, dx:u.dx, dy:u.dy, rot:u.rot }; }
+  await idbSet('photos:'+MEM_BRAND+':'+(slot||'auto'), out);
+}
+let _ppTmr=null;
+function persistPhotos(){ clearTimeout(_ppTmr); _ppTmr=setTimeout(()=>savePhotosTo('auto'),400); }
+// re-embed photos from an IDB slot into the fresh doc + restore their crop
+async function loadPhotosFrom(slot){
+  const rec=await idbGet('photos:'+MEM_BRAND+':'+(slot||'auto')); if(!rec) return 0; let n=0;
+  for(const k in rec){ const r=rec[k]; try{ const b=r.bytes instanceof Uint8Array? r.bytes : new Uint8Array(r.bytes);
+    await embedBytes(k, b, r.isPng, r); n++; }catch(_){} }
+  return n;
+}
+// Frame an uploaded image into a tile [x,y,w,h]: cover-fit, then the drink's own zoom / pan / rotate.
+// Defaults (zoom 1, dx/dy 0, rot 0) reproduce the plain centred cover-fit exactly.
+function photoFit(up, tile){
+  const tw=tile[2], th=tile[3];
+  const rot=(((up.rot||0)%360)+360)%360, swap=(rot===90||rot===270);
+  const effW = swap? up.ih : up.iw, effH = swap? up.iw : up.ih;   // rotated footprint drives the cover-fit
+  const sc = Math.max(tw/effW, th/effH) * (up.zoom||1);
+  return { rot, rad:rot*Math.PI/180, w:up.iw*sc, h:up.ih*sc };
+}
+// Never let a pan drag the image off its tile (that would expose the background). Max pan is
+// however much the ROTATED footprint overhangs the tile — so at zoom 1 there's little/no slack.
+function photoClamp(up, tile){
+  const tw=tile[2], th=tile[3], f=photoFit(up,tile), swap=(f.rot===90||f.rot===270);
+  const fw = swap? f.h : f.w, fh = swap? f.w : f.h;
+  const mx = Math.max(0,(fw-tw)/2), my = Math.max(0,(fh-th)/2);
+  up.dx = Math.min(mx, Math.max(-mx, up.dx||0));
+  up.dy = Math.min(my, Math.max(-my, up.dy||0));
+  return up;
+}
+function photoDrawOp(up, tile){
+  const tx=tile[0],ty=tile[1],tw=tile[2],th=tile[3];
+  photoClamp(up, tile);
+  const f=photoFit(up,tile);
+  const cx = tx + tw/2 + (up.dx||0), cy = ty + th/2 + (up.dy||0);   // image centre (pan moves it)
+  const co=Math.cos(f.rad), si=Math.sin(f.rad);
+  const a=f.w*co, b=f.w*si, c=-f.h*si, d=f.h*co;                    // unit square -> placed image
+  const e=cx-(a+c)/2, ff=cy-(b+d)/2;
+  return '\nq '+num(tx)+' '+num(ty)+' '+num(tw)+' '+num(th)+' re W n '
+       + num(a)+' '+num(b)+' '+num(c)+' '+num(d)+' '+num(e)+' '+num(ff)+' cm '+up.name+' Do Q\n';
+}
+// the tile a drink's photo occupies (w/h is all the framing UI needs)
+function photoTileWH(key){
+  const p=String(key).split(':');
+  if(p[1]==='add') return [99.6,66];
+  const pd=FM.pages.find(x=>x.page===+p[0]); const it=pd&&pd.items[+p[1]];
+  return (it&&it.photo_tile)? [it.photo_tile[2], it.photo_tile[3]] : [99.6,66];
+}
+// Stamp a brand-new drink (name/desc/price + placeholder photo tile) at a freed slot baseline y.
+function stampNewDrink(pd, slotY, dr){
+  const regF='/'+(pd.reg_font||'T1_0'), boldF='/'+(pd.bold_font||'T1_1');
+  const nx=9.5, nsz=13, dsz=7; let out='\n';
+  out+='q 0.16 0.15 0.13 rg 181.03 '+num(slotY-46)+' 99.6 66 re f Q\n';   // placeholder photo tile
+  const nl=nameLines(dr.name); const _nlv=nl.filter(Boolean).length||1;
+  out+='BT 0.09 0.09 0.09 rg '+regF+' 1 Tf '+nsz+' 0 0 '+nsz+' '+num(nx)+' '+num(slotY)+' Tm';
+  nl.forEach((ln,i)=> out+= (i? ' 0 -1.2 Td':' ')+'('+escPdf(ln)+')Tj');
+  out+=' ET\n';
+  const DLEAD=-1.4, DCOL='0.42 0.4 0.38 rg';
+  const dy=slotY - _nlv*15 - 3;
+  let vx=nx, vy=dy;
+  if(dr.desc){ const dl=descLines(dr.desc, DESC_MC).slice(0,3);   // honour Enter here too
+    out+='BT '+DCOL+' '+boldF+' 1 Tf '+dsz+' 0 0 '+dsz+' '+num(nx)+' '+num(dy)+' Tm ('+escPdf(dl[0]||'')+')Tj';
+    for(let i=1;i<dl.length;i++) out+=' 0 '+num(DLEAD)+' Td ('+escPdf(dl[i])+')Tj';
+    out+=' ET\n';
+    vy=dy+DLEAD*dsz*(dl.length-1);
+    vx=nx+(dl[dl.length-1]||'').length*DESC_ADV*dsz+DESC_ADV*dsz;   // one space of separation
+  }
+  // volume for a brand-new drink is stamped in RMSB (like the price) rather than the subset
+  // menu font, so every digit is available — no 1/7/9 gap to work around.
+  if(dr.vol) out+=volStamp({x:vx,y:vy,size:5}, DCOL, '['+dr.vol+'ML]');
+  out+=priceStamp({x:157,y:slotY-24,size:7}, dr.price||'');
+  return out;
+}
+// Reflow: shift every Tm and photo-block y that sits BELOW a removed drink up by row_h per removed-above.
+function reflowOps(bytes, removedTops, delSpans, rowH){
+  const s=new TextDecoder('latin1').decode(bytes); const ops=[];
+  const inDel=i=> delSpans.some(d=> d[0]<=i && i<d[1]);
+  // shift = sum of the ACTUAL heights (pitch) of removed drinks sitting above this y
+  const shiftFor=y=> removedTops.filter(t=> t.y>y+0.5).reduce((a,t)=>a+t.pitch,0);
+  let m;
+  // text Tm ops: shift the y
+  let re1=/([\d.]+) 0 0 ([\d.]+) (-?[\d.]+) (-?[\d.]+) Tm/g;
+  while((m=re1.exec(s))){ if(inDel(m.index)) continue; const y=parseFloat(m[4]); const sh=shiftFor(y); if(!sh) continue;
+    ops.push({s:m.index,e:m.index+m[0].length,rep:enc(m[1]+' 0 0 '+m[2]+' '+m[3]+' '+num(y+sh)+' Tm')}); }
+  // affine cm transforms (photos incl rotated, badges): shift the ty (group 6). skip delSpans
+  let re2=/(-?[\d.]+) (-?[\d.]+) (-?[\d.]+) (-?[\d.]+) (-?[\d.]+) (-?[\d.]+) cm/g;
+  while((m=re2.exec(s))){ if(inDel(m.index)) continue; const y=parseFloat(m[6]); const sh=shiftFor(y); if(!sh) continue;
+    ops.push({s:m.index,e:m.index+m[0].length,rep:enc(m[1]+' '+m[2]+' '+m[3]+' '+m[4]+' '+m[5]+' '+num(y+sh)+' cm')}); }
+  // rectangles (clip tiles, SPECIALS bars, dividers): shift y. skip full-page (|h|>400) & delSpans
+  let re3=/(-?[\d.]+) (-?[\d.]+) (-?[\d.]+) (-?[\d.]+) re/g;
+  while((m=re3.exec(s))){ if(inDel(m.index)) continue; const y=parseFloat(m[2]), h=parseFloat(m[4]); if(Math.abs(h)>400) continue; const sh=shiftFor(y+h/2); if(!sh) continue;
+    ops.push({s:m.index,e:m.index+m[0].length,rep:enc(m[1]+' '+num(y+sh)+' '+m[3]+' '+m[4]+' re')}); }
+  return ops;
+}
+const enc=s=>new TextEncoder().encode(s);
+const escPdf=s=>(s||'').replace(/\\/g,'\\\\').replace(/\(/g,'\\(').replace(/\)/g,'\\)');
+function esc(s){return (s+'').replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));}
+const num=n=>{ let s=(+n).toFixed(2).replace(/0+$/,'').replace(/\.$/,''); return s||'0'; };
+function fontNote(chars){ let n=document.getElementById('fontnote'); if(!n)return; n.textContent='“'+chars+'” isn’t in this menu’s font — can’t print'; n.classList.add('on'); clearTimeout(n._t); n._t=setTimeout(()=>n.classList.remove('on'),2400); }
+function cleanField(v, role){ const al=(FM.allowed&&FM.allowed[role])||''; let out='',drop=''; for(const ch of v){ if(al.indexOf(ch)>=0) out+=ch; else drop+=ch; } if(drop.replace(/\s/g,'')) fontNote(drop.replace(/\s+/g,' ').trim().split('').join(' ')); return out; }
+
+
+function fontNote(chars){ let n=document.getElementById('fontnote'); if(!n)return; n.textContent='“'+chars+'” isn’t in this menu’s font'; n.classList.add('on'); clearTimeout(n._t); n._t=setTimeout(()=>n.classList.remove('on'),2400); }
+function cleanField(v, role){ const al=(FM.allowed&&FM.allowed[role]); if(al==null) return v; let out='',drop=''; for(const ch of v){ if(al.indexOf(ch)>=0||ch===' ') out+=ch; else drop+=ch; } if(drop.replace(/\s/g,'')) fontNote(drop.replace(/\s+/g,' ').trim().split('').join(' ')); return out; }
+function greedyWrap(words,mc){ const L=[];let c='';for(const w of words){if(!c)c=w;else if((c+' '+w).length<=mc)c+=' '+w;else{L.push(c);c=w;}}if(c)L.push(c);return L; }
+const K=(p,i,f)=>p+':'+i+':'+f;
+const K0=(p,i)=>p+':'+i;
+function val(p,i,f,orig){ const k=K(p,i,f); return (k in edits)?edits[k]:orig; }
+
+function priceStamp(pos, v){ return '\nq BT '+FM.price_font+' '+num(FM.price_size)+' Tf 0 0 0 rg '+num(pos.x)+' '+num(pos.y)+' Td ('+escPdf(v)+')Tj ET Q\n'; }
+
+// ---- MARKERS: stamp J / dairy / gluten like the food menu ----
+// reposition+scale a vector icon: replace its own cm origin with (tx,ty), scale by s
+function iconStamp(parts, tx, ty, s){ let out=''; for(const p of parts){
+  const b=p.bytes.replace(/1 0 0 1 -?[\d.]+ -?[\d.]+ cm/, num(s)+' 0 0 '+num(s)+' '+num(tx+(p.dx||0))+' '+num(ty+(p.dy||0))+' cm');
+  out+=p.color+' '+b+'\n'; } return out; }
+function iconW(parts){ const body=(parts[0].bytes.split('cm')[1]||''); const ns=(body.match(/-?[\d.]+/g)||[]).map(Number); const xs=ns.filter((_,i)=>i%2===0); return xs.length? Math.max(...xs)-Math.min(...xs):5; }
+// the current marker set for an existing drink (override if edited, else the baked defaults)
+function drinkMarkerSet(mp, idx, it){ const k=K0(mp,idx); if(k in markerEdits) return new Set(markerEdits[k]);
+  const s=new Set(); if(it.marker) s.add('jain'); if(it.dairy_span) s.add('dairy'); return s; }
+// stamp a marker cluster (dairy, gluten, then J) packed left-to-right from anchor [ax,ay]
+// ---- MULTI-LINE NAMES: honour manual line breaks; keep markers below the whole title ----
+function nameLines(str){
+  let L=String(str==null?'':str).toUpperCase().split(/\r?\n/).map(x=>x.replace(/\s+$/,''));
+  while(L.length>1 && !L[L.length-1]) L.pop();      // drop trailing blank lines
+  return L.length?L:[''];
+}
+const _ngCache={};
+function nameGeomOf(it, PT){                          // parse the baked name block: size, x, first-line y, Td leading
+  if(it._ng) return it._ng;
+  const s0=it.name_spans[0][0], bt=PT.lastIndexOf('BT',s0), seg=PT.slice(bt,s0);
+  const m=/([\d.]+) 0 0 ([\d.]+) (-?[\d.]+) (-?[\d.]+) Tm/.exec(seg);
+  const size=m?parseFloat(m[2]):12.9512, x0=m?parseFloat(m[3]):9.15;
+  let lead=-1.2;
+  if(it.name_spans.length>=2){ const t=/0 (-?[\d.]+) Td/.exec(PT.slice(it.name_spans[0][1], it.name_spans[1][0])); if(t) lead=parseFloat(t[1]); }
+  return it._ng={size, x0, topY:it.top_y, lead};
+}
+// where the marker cluster starts for an EDITED name (after its true last line)
+function editedNameAnchor(it, nl2, PT){
+  const g=nameGeomOf(it,PT), B=it.name_spans.length, M=Math.min(nl2.length,B);
+  const lh=Math.abs(g.lead)*g.size, lastLen=(nl2[M-1]||'').length;
+  const baseY=g.topY-(M-1)*lh, bakedBaseY=g.topY-(B-1)*lh;
+  const raise=(it.mk_anchor?it.mk_anchor[1]:bakedBaseY+5.9)-bakedBaseY;
+  return [ g.x0 + lastLen*0.63*g.size + 2.4, baseY+raise ];
+}
+// fit N typed lines into B baked spans: keep the first B-1, merge any overflow words into the last
+function nameToSpans(nl, B){
+  if(nl.length<=B){ const o=nl.slice(); while(o.length<B) o.push(''); return o; }
+  const head=nl.slice(0,B-1), tail=nl.slice(B-1).join(' ');
+  return head.concat([tail]);
+}
+// ---- DESCRIPTIONS: honour manual line breaks; keep the inline volume glued to the last line ----
+// The volume ([300ML]) is not its own column — it renders at the END of the description's last
+// line, inside the same BT..ET block. So it must be re-placed whenever the description re-wraps,
+// not only when the volume itself is edited. desc_geom / vol_* are baked into the fieldmap by
+// src/capdrinks/vol_data.py.
+const DESC_MC=32;                                   // chars per description line
+const DESC_ADV=0.63;                                // AOMono advance (em) — /Widths is [0,630]
+function descAdvance(g, s){ s=s||'';
+  const spaces=s.length-s.replace(/ /g,'').length;
+  return s.length*(DESC_ADV*g.th + g.tc*g.th) + spaces*g.tw*g.th; }
+// manual breaks first, then greedy-wrap each resulting paragraph
+function descLines(str, mc){
+  const out=[];
+  String(str==null?'':str).split(/\r?\n/).forEach(p=>{
+    const w=greedyWrap(p.split(/\s+/).filter(Boolean), mc);
+    if(w.length) out.push.apply(out,w); else out.push('');
+  });
+  while(out.length>1 && !out[out.length-1]) out.pop();
+  return out.length?out:[''];
+}
+// lines a drink can show: the baked span count plus whatever fits in the gap below its content
+function descCapacity(it){
+  const B=(it.desc_spans||[]).length, g=it.desc_geom;
+  if(!B||!g) return B;
+  const lineH=Math.abs(g.lead)*g.size;
+  const free=(it.pitch!=null&&it.content_h!=null)? it.pitch-it.content_h : 0;
+  return B + Math.max(0, Math.floor((free-2)/lineH));      // 2pt safety margin
+}
+// rendered lines for an EDITED drink (null if untouched — untouched bytes are never respliced)
+function descRender(mp, idx, it){
+  const B=(it.desc_spans||[]).length;
+  if(!B || !(K(mp,idx,'desc') in edits)) return null;
+  const cap=Math.max(1,descCapacity(it));
+  let L=descLines(edits[K(mp,idx,'desc')], DESC_MC);
+  const joined=L.length>cap;      // more lines typed than this drink has room for
+  // merge rather than drop: an over-long line is visibly wrong in the preview, a silently
+  // truncated one is not. validate() reports both cases.
+  if(joined) L=L.slice(0,cap-1).concat([L.slice(cap-1).join(' ')]);
+  return {lines:L, joined:joined, wide:L.some(l=>l.length>DESC_MC), cap:cap, baked:B};
+}
+// where the volume sits given the rendered description lines
+function volPlace(it, lines){
+  const g=it.desc_geom;
+  if(!g||!lines||!lines.length) return {x:it.vol_pos.x, y:it.vol_pos.y};
+  const li=lines.length-1;
+  // Never let the volume touch the text. Some drinks bake their separation as a trailing space
+  // INSIDE the description ("ginger "), which retyping strips — vol_gap is then ~0 and the
+  // volume would butt straight up against the last word. Others use a real gap, which already
+  // measures one space wide, so taking the larger of the two is right in both cases.
+  const gap=Math.max(it.vol_gap||0, descAdvance(g,' '));
+  return { x: g.x0+(g.dx||0)+descAdvance(g,lines[li])+gap,
+           y: g.y0+g.lead*g.size*li };
+}
+// fallback for volumes whose digits are missing from the subset font (1, 7 and 9 are absent),
+// mirroring priceStamp. Re-states the fill colour: the stamp lands at the end of the stream,
+// far from the BT..ET block the baked volume inherited its colour from.
+function volStamp(pos, col, v){ return '\nq '+(col||'0 0 0 rg')+' BT '+FM.price_font+' '+num(pos.size||5)+' Tf '+num(pos.x)+' '+num(pos.y)+' Td ('+escPdf(v)+')Tj ET Q\n'; }
+function stampMarkers(ax, ay, set){ const J=FM.jmark, MIC=FM.micons, C=FM.mk_const; if(!J||!MIC||!C||!set.size) return '';
+  const s=C.scale, DW=iconW(MIC.dairy), GW=iconW(MIC.gluten); let out='\nq\n', ix=ax;
+  if(set.has('dairy')){ out+=iconStamp(MIC.dairy, ix, ay+(C.dy_dairy||0), s); ix+=DW*s+C.gap; }
+  if(set.has('gluten')){ out+=iconStamp(MIC.gluten, ix, ay+(C.dy_gluten||0), s); ix+=GW*s+C.gap; }
+  if(set.has('jain')){ out+='BT '+J.color+' k '+J.font+' 1 Tf 0 Tc 0 Tw '+num(J.size)+' 0 0 '+num(J.size)+' '+num(ix)+' '+num(ay+(C.dy_j||0))+' Tm (J)Tj ET\n'; }
+  out+='Q\n'; return out; }
+// collapse duplicate / overlapping byte ranges into a minimal disjoint set
+function mergeSpans(list){
+  const s=list.slice().sort((a,b)=>a[0]-b[0]||a[1]-b[1]), out=[];
+  for(const sp of s){ const last=out[out.length-1];
+    if(last && sp[0]<=last[1]) last[1]=Math.max(last[1],sp[1]); else out.push([sp[0],sp[1]]); }
+  return out;
+}
+function spliceBytes(src, ops){ ops=ops.slice().sort((a,b)=>a.s-b.s); let L=src.length+ops.reduce((d,o)=>d+(o.rep.length-(o.e-o.s)),0); const out=new Uint8Array(L); let si=0,oi=0; for(const o of ops){ out.set(src.subarray(si,o.s),oi);oi+=o.s-si; out.set(o.rep,oi);oi+=o.rep.length; si=o.e; } out.set(src.subarray(si),oi); return out; }
+
+async function regenerate(){
+  const rowH=FM.row_h||60;
+  for(const mp of FM.menu_pages){
+    const ps=pageStreams[mp]; const pageData=FM.pages.find(p=>p.page===mp);
+    const PT=new TextDecoder('latin1').decode(ps.pristine);
+    let ops=[]; let append='';
+    // 1) removed drinks: collect delete spans + tops
+    const delSpans=[]; const removedTops=[];
+    pageData.items.forEach((it,idx)=>{ if(!removed.has(K0(mp,idx))) return;
+      (it.name_spans||[]).forEach(sp=>delSpans.push(sp)); (it.desc_spans||[]).forEach(sp=>delSpans.push(sp));
+      if(it.price_span)delSpans.push(it.price_span); if(it.vol_span)delSpans.push(it.vol_span);
+      if(it.marker_span)delSpans.push(it.marker_span); if(it.photo_span)delSpans.push(it.photo_span);
+      (it.extra_spans||[]).forEach(sp=>delSpans.push(sp));
+      if(it.top_y!=null) removedTops.push({y:it.top_y, pitch:(it.pitch||rowH)});
+    });
+    // marker-edited survivors: delete their baked J + baked dairy so we can restamp the chosen set.
+    // Added to delSpans BEFORE reflow so reflowOps won't try to shift the (deleted) baked marks.
+    pageData.items.forEach((it,idx)=>{
+      if(removed.has(K0(mp,idx))) return;
+      const touched=(K0(mp,idx) in markerEdits) || (K(mp,idx,'name') in edits);
+      if(!touched) return;
+      if(it.marker_span) delSpans.push(it.marker_span);
+      if(it.dairy_span) delSpans.push(it.dairy_span);
+    });
+    // A drink's volume (and its dairy icon) is ALSO listed in extra_spans, so the raw delete list
+    // can name the same bytes twice. spliceBytes assumes non-overlapping ops and runs its cursor
+    // backwards if it ever meets an overlap, corrupting the stream — so merge before emitting.
+    for(const d of mergeSpans(delSpans)) ops.push({s:d[0],e:d[1],rep:enc('')});
+    // Volumes we re-place ourselves must be hidden from reflowOps: it rewrites every Tm it sees,
+    // and two ops covering one byte range would corrupt the stream in spliceBytes. We apply the
+    // reflow shift to them by hand instead (see the volume block below).
+    const volSkip=[];
+    pageData.items.forEach((it,idx)=>{
+      if(removed.has(K0(mp,idx)) || !it.vol_span) return;
+      if((K(mp,idx,'vol') in edits) || (K(mp,idx,'desc') in edits)) volSkip.push(it.vol_span);
+    });
+    // 2) reflow survivors below removed drinks (shift by real heights)
+    if(removedTops.length) ops=ops.concat(reflowOps(ps.pristine, removedTops, delSpans.concat(volSkip), rowH));
+    const shiftOf=y=> removedTops.filter(t=> t.y>((y||0)+0.5)).reduce((a,t)=>a+t.pitch,0);
+    // 3) text edits + prices for survivors
+    pageData.items.forEach((it,idx)=>{
+      if(removed.has(K0(mp,idx))) return;
+      const sh=shiftOf(it.top_y);
+      if(K(mp,idx,'name') in edits && it.name_spans.length){
+        const nl=nameToSpans(nameLines(edits[K(mp,idx,'name')]), it.name_spans.length);
+        it.name_spans.forEach((sp,i)=> ops.push({s:sp[0],e:sp[1],rep:enc('('+escPdf(nl[i]||'')+')Tj')}));
+      }
+      const _dr=descRender(mp,idx,it);
+      if(_dr){
+        const B=_dr.baked, L=_dr.lines, lead=it.desc_geom? it.desc_geom.lead : -1.2;
+        for(let i=0;i<B;i++){
+          let rep='('+escPdf(L[i]||'')+')Tj';
+          // lines beyond the baked spans ride inside the LAST span, stepping down with the
+          // artwork's own leading — the inter-span bytes that normally carry it aren't ours
+          if(i===B-1) for(let j=B;j<L.length;j++) rep+='\n0 '+num(lead)+' Td\n('+escPdf(L[j])+')Tj';
+          ops.push({s:it.desc_spans[i][0],e:it.desc_spans[i][1],rep:enc(rep)});
+        }
+      }
+      // volume: re-placed when the description re-wraps, not just when the volume is edited
+      if(it.vol_span && it.vol_pos && ((K(mp,idx,'vol') in edits) || _dr)){
+        const vv=val(mp,idx,'vol',it.vol)||'';
+        const vtxt=vv? (it.vol_pre||'')+vv+(it.vol_suf||'') : '';
+        const vp=_dr? volPlace(it,_dr.lines) : {x:it.vol_pos.x, y:it.vol_pos.y};
+        const va=(FM.allowed&&FM.allowed.desc)||'';
+        const vfits=!!vtxt && [...vtxt].every(c=>va.indexOf(c)>=0);
+        if(vfits) ops.push({s:it.vol_span[0],e:it.vol_span[1],rep:enc('5 0 0 5 '+num(vp.x)+' '+num(vp.y+sh)+' Tm\n('+escPdf(vtxt)+')Tj')});
+        else { ops.push({s:it.vol_span[0],e:it.vol_span[1],rep:enc('')});
+               if(vtxt) append+=volStamp({x:vp.x,y:vp.y+sh,size:it.vol_pos.size}, it.vol_color, vtxt); }
+      }
+      if(it.price_span){ const pv=val(mp,idx,'price',it.price);
+        const pa=(FM.allowed&&FM.allowed.price)||'0235';
+        const fits=[...(pv||'')].every(c=>pa.indexOf(c)>=0);
+        if(fits){ if(K(mp,idx,'price') in edits) ops.push({s:it.price_span[0],e:it.price_span[1],rep:enc('('+escPdf(pv)+')Tj')}); }
+        else { ops.push({s:it.price_span[0],e:it.price_span[1],rep:enc('()Tj')}); if(it.price_pos&&pv) append+=priceStamp({x:it.price_pos.x,y:it.price_pos.y+sh,size:it.price_pos.size}, pv); }
+      }
+      // uploaded photo -> draw over the drink's (shifted) tile
+      const up=photoUploads[K0(mp,idx)];
+      if(up && it.photo_tile){ const t=it.photo_tile; append+=photoDrawOp(up, [t[0], t[1]+sh, t[2], t[3]]); }
+      // markers ALWAYS sit under the whole title: restamp when the name OR the marker set changed.
+      const _nameEd=(K(mp,idx,'name') in edits), _mkEd=(K0(mp,idx) in markerEdits);
+      if((_nameEd || _mkEd) && it.mk_anchor){
+        const set=_mkEd? new Set(markerEdits[K0(mp,idx)]) : drinkMarkerSet(mp,idx,it);
+        const a=_nameEd? editedNameAnchor(it, nameLines(edits[K(mp,idx,'name')]), PT) : it.mk_anchor;
+        append+=stampMarkers(a[0], a[1]+sh, set);
+      }
+    });
+    // 4) added drinks -> stack into the space freed below the LAST survivor's real content.
+    const addList=added[mp]||[];
+    if(addList.length){
+      const rmSet=new Set([...removed].filter(k=>k.startsWith(mp+':')).map(k=>+k.split(':')[1]));
+      const survs=pageData.items.map((it,idx)=>({it,idx})).filter(o=>!rmSet.has(o.idx)&&o.it.top_y!=null);
+      // Rows are a UNIFORM strip (the photo grid) — a removal frees exactly one row at the bottom,
+      // so new drinks drop straight onto the next grid row. (Text pitch varies with 1- vs 2-line
+      // names and is NOT the row height — using it here is what left holes / overlaps.)
+      const _pp=pageData.items.map(it=>it.pitch).filter(Boolean).sort((a,b)=>a-b);
+      const ROW = _pp.length? _pp[Math.floor(_pp.length/2)] : rowH;   // median row (1st row can be an outlier)
+      let lastTileY;
+      if(survs.length){ const last=survs.reduce((a,b)=> a.it.top_y<=b.it.top_y? a:b);
+        lastTileY = (last.it.photo_tile? last.it.photo_tile[1] : last.it.top_y-46) + shiftOf(last.it.top_y); }
+      else lastTileY = ((pageData.items[0]&&pageData.items[0].photo_tile)? pageData.items[0].photo_tile[1]+ROW : 529.2+ROW);
+      addList.forEach((dr,i)=>{ const tileY = lastTileY - ROW*(i+1); const by = tileY + 46; if(tileY>-2){ append+=stampNewDrink(pageData, by, dr);
+        const up=photoUploads[mp+':add:'+i]; if(up) append+=photoDrawOp(up, [181.03, tileY, 99.6, 66]);
+        if(dr.markers && dr.markers.length){
+          const nl=nameLines(dr.name).filter(Boolean); const _M=nl.length||1;
+          const lastLen=(nl[_M-1]||'').length;
+          append+=stampMarkers(9.5 + lastLen*0.63*13 + 3.0, by - (_M-1)*15.6 + 5.9, new Set(dr.markers));
+        }
+      } });
+    }
+    let edited = ops.length ? spliceBytes(ps.pristine, ops) : ps.pristine.slice();
+    if(append){ const ab=enc(append); const m=new Uint8Array(edited.length+ab.length); m.set(edited,0); m.set(ab,edited.length); edited=m; }
+    ps.dict.set(PDFName.of('Length'), PDFNumber.of(edited.length));
+    doc.context.assign(ps.ref, PDFRawStream.of(ps.dict, edited));
+  }
+  lastBytes=await doc.save({useObjectStreams:false}); try{MEM.tick();}catch(_){} return lastBytes;
+}
+function schedulePreview(){ clearTimeout(ptimer); ptimer=setTimeout(async()=>{ await regenerate(); renderPreview(); },320); }
+async function renderPreview(){
+  const my=++renderToken; document.getElementById('busy').classList.add('on');
+  const bytes=lastBytes||await regenerate();
+  try{ if(pdfjsDoc){pdfjsDoc.destroy();pdfjsDoc=null;}
+    const pdf=await pdfjsLib.getDocument({data:bytes.slice(0)}).promise; if(my!==renderToken){pdf.destroy();return;} pdfjsDoc=pdf;
+    const page=await pdf.getPage(activePage+1);
+    const pane=document.getElementById('previewPane'); const avail=pane.clientWidth-28;
+    const base=page.getViewport({scale:1}); const scale=Math.min(avail/base.width,2.8);
+    const vp=page.getViewport({scale:scale*window.devicePixelRatio});
+    const cv=document.getElementById('preview'),cx=cv.getContext('2d');
+    cv.width=vp.width;cv.height=vp.height;cv.style.width=(vp.width/window.devicePixelRatio)+'px';
+    await page.render({canvasContext:cx,viewport:vp}).promise;
+  }catch(e){ if(!(e&&String(e.message||e).includes('ancelled'))) console.error(e); }
+  if(my===renderToken) document.getElementById('busy').classList.remove('on');
+}
+function buildTabs(){ const t=document.getElementById('tabs'); t.innerHTML=''; FM.menu_pages.forEach((mp,i)=>{ const b=document.createElement('button'); b.dataset.pg=mp; b.textContent='Page '+(i+1); if(mp===activePage)b.classList.add('on'); b.onclick=()=>{ activePage=mp; buildEditor(); renderPreview(); }; t.appendChild(b); }); }
+function photoUploadBtn(key){
+  const wrap=document.createElement('label'); const has=!!photoUploads[key];
+  wrap.style.cssText='display:inline-flex;align-items:center;gap:6px;font:inherit;font-size:11.5px;cursor:pointer;margin-top:9px;padding:5px 11px;border:1px solid var(--line2);border-radius:8px;width:max-content;color:'+(has?'var(--aiko)':'var(--muted)');
+  wrap.textContent = has? '✓ Photo set · replace' : '⬆ Upload photo';
+  const inp=document.createElement('input'); inp.type='file'; inp.accept='image/*'; inp.style.display='none';
+  inp.addEventListener('change',e=>{ const f=e.target.files&&e.target.files[0]; if(f) embedPhoto(key,f); });
+  wrap.appendChild(inp); return wrap;
+}
+// ---- FRAMING: drag to reposition, zoom, rotate. The thumbnail mirrors photoDrawOp exactly,
+// so what you frame here is what prints.
+let _ptmr=null;
+function schedulePhotoDraw(){ clearTimeout(_ptmr); _ptmr=setTimeout(async()=>{ await regenerate(); renderPreview(); try{MEM.tick();}catch(_){} }, 220); }
+// mirror photoDrawOp into an <img> inside a tile-ratio box scaled by K (pts->px)
+function paintFrame(up, wh, K, img){
+  photoClamp(up,[0,0,wh[0],wh[1]]);
+  const f=photoFit(up,[0,0,wh[0],wh[1]]);
+  img.style.width=(f.w*K)+'px'; img.style.height=(f.h*K)+'px';
+  img.style.left=((wh[0]/2+(up.dx||0))*K)+'px';
+  img.style.top =((wh[1]/2-(up.dy||0))*K)+'px';            // PDF y is up, CSS y is down
+  img.style.transform='translate(-50%,-50%) rotate('+(-f.rot)+'deg)';
+}
+// card: a small live preview of the crop + a button that opens the full crop editor
+function photoAdjustUI(key){
+  const up=photoUploads[key]; if(!up||!up.src) return null;
+  const wh=photoTileWH(key), K=58/wh[0];
+  const box=document.createElement('div'); box.className='pframe pmini'; box.title='Edit crop';
+  box.style.width=(wh[0]*K)+'px'; box.style.height=(wh[1]*K)+'px';
+  const img=document.createElement('img'); img.src=up.src; img.draggable=false; box.appendChild(img);
+  paintFrame(up,wh,K,img);
+  box.onclick=()=>openCropModal(key);
+  const btn=document.createElement('button'); btn.type='button'; btn.className='pbtn'; btn.textContent='✎ Adjust crop'; btn.onclick=()=>openCropModal(key);
+  const wrap=document.createElement('div'); wrap.className='padj'; wrap.append(box,btn);
+  return wrap;
+}
+// full crop editor: ADJUSTABLE CROP BOX. The whole photo shows dimmed; a ratio-locked box
+// (drag corners/edges to resize, drag body to move) picks the exact region that fills the
+// drink's fixed photo slot. The box is converted to the same {zoom,dx,dy,rot} photoDrawOp
+// model, so what the box selects is exactly what prints — no distortion, no background.
+function openCropModal(key){
+  const up=photoUploads[key]; if(!up||!up.src||!up.iw||!up.ih) return;
+  if(document.querySelector('.cropov')) return;
+  const wh=photoTileWH(key), tw=wh[0], th=wh[1], ratio=tw/th;
+  const VW=(window.innerWidth||640);
+  const STAGEW=Math.round(Math.min(430,VW*0.72)), STAGEH=Math.round(STAGEW*0.72);
+  const KR=Math.min(120,STAGEW*0.34)/tw;                 // small live "result" preview scale
+  const snap={zoom:up.zoom||1, dx:up.dx||0, dy:up.dy||0, rot:up.rot||0};   // Cancel target
+
+  const ov=document.createElement('div'); ov.className='cropov';
+  ov.innerHTML='<div class="cropcard"><div class="crophd">Crop photo<span>drag box &middot; corners/edges resize &middot; scroll or slider to zoom</span></div>'
+    +'<div class="cropwrap"><div class="cropstage"><img class="cropimg" draggable="false"><div class="cropbox"><div class="cg"></div></div></div>'
+    +'<div class="cropside"><span class="rl">Fills the slot</span><div class="cropresult"><img draggable="false"></div></div></div>'
+    +'<div class="croprow"><span class="cz">−</span><input type="range" class="crzoom" min="1" max="3" step="0.01"><span class="cz">+</span>'
+    +'<button class="cropbtn" data-a="rot" type="button" title="Rotate 90°">⟲</button><button class="cropbtn" data-a="reset" type="button">Reset</button></div>'
+    +'<div class="cropfoot"><button class="cropbtn ghost" data-a="cancel" type="button">Cancel</button><button class="cropbtn save" data-a="save" type="button">Save</button></div></div>';
+  document.body.appendChild(ov);
+  const stage=ov.querySelector('.cropstage'), img=ov.querySelector('.cropimg'),
+        cbox=ov.querySelector('.cropbox'), z=ov.querySelector('.crzoom'),
+        rbox=ov.querySelector('.cropresult'), rimg=rbox.querySelector('img');
+  stage.style.width=STAGEW+'px'; stage.style.height=STAGEH+'px'; img.src=up.src; rimg.src=up.src;
+  rbox.style.width=(tw*KR)+'px'; rbox.style.height=(th*KR)+'px';
+
+  // 8 resize handles (4 corners + 4 edges), positioned by fraction of the box
+  const HANDLES=[[0,0],[1,0],[1,1],[0,1],[0.5,0],[1,0.5],[0.5,1],[0,0.5]];
+  HANDLES.forEach(([hx,hy])=>{
+    const h=document.createElement('div'); const edge=(hx===0.5||hy===0.5);
+    h.className='crophandle'+(edge?' edge':''); h.dataset.hx=hx; h.dataset.hy=hy;
+    h.style.left=(hx*100)+'%'; h.style.top=(hy*100)+'%';
+    h.style.cursor = hx===0.5 ? 'ns-resize' : hy===0.5 ? 'ew-resize' : (hx===hy?'nwse-resize':'nesw-resize');
+    cbox.appendChild(h);
+  });
+
+  // layout of the dimmed image inside the stage (recomputed on rotate)
+  let effW,effH,D,dispW,dispH,imgL,imgT,maxBw,minBw;
+  const box={x:0,y:0,w:0,h:0};
+  function computeLayout(){
+    const rot=(((up.rot||0)%360)+360)%360, swap=(rot===90||rot===270);
+    effW=swap?up.ih:up.iw; effH=swap?up.iw:up.ih;
+    D=Math.min(STAGEW/effW, STAGEH/effH); dispW=effW*D; dispH=effH*D;
+    imgL=(STAGEW-dispW)/2; imgT=(STAGEH-dispH)/2;
+    maxBw=Math.min(dispW, dispH*ratio); minBw=maxBw/3;    // box at zoom 1 .. zoom 3
+    const rot0=rot;
+    img.style.width=((rot0===90||rot0===270)?dispH:dispW)+'px';
+    img.style.height=((rot0===90||rot0===270)?dispW:dispH)+'px';
+    img.style.left=(imgL+dispW/2)+'px'; img.style.top=(imgT+dispH/2)+'px';
+    img.style.transform='translate(-50%,-50%) rotate('+(-rot0)+'deg)';
+  }
+  function clampBox(){
+    box.w=Math.max(minBw,Math.min(maxBw,box.w)); box.h=box.w/ratio;
+    box.x=Math.max(imgL,Math.min(imgL+dispW-box.w,box.x));
+    box.y=Math.max(imgT,Math.min(imgT+dispH-box.h,box.y));
+  }
+  function frameToBox(){                                  // up{zoom,dx,dy} -> box(px)
+    const sc=Math.max(tw/effW,th/effH)*(up.zoom||1);
+    const cropX=effW/2-((up.dx||0)+tw/2)/sc, cropY=effH/2-(th/2-(up.dy||0))/sc;
+    box.w=(tw/sc)*D; box.h=box.w/ratio; box.x=imgL+cropX*D; box.y=imgT+cropY*D; clampBox();
+  }
+  function boxToFrame(){                                  // box(px) -> up{zoom,dx,dy}
+    const cropX=(box.x-imgL)/D, cropY=(box.y-imgT)/D, cropW=box.w/D, sc=tw/cropW;
+    up.zoom=sc/Math.max(tw/effW,th/effH);
+    up.dx=(effW/2-cropX)*sc - tw/2;
+    up.dy=th/2 - (effH/2-cropY)*sc;
+  }
+  function paintBox(){
+    cbox.style.left=box.x+'px'; cbox.style.top=box.y+'px';
+    cbox.style.width=box.w+'px'; cbox.style.height=box.h+'px';
+    z.value=Math.max(1,Math.min(3,maxBw/box.w));
+    boxToFrame(); paintFrame(up,wh,KR,rimg);             // live "result" mirrors what prints
+  }
+  function resizeCenter(newW){
+    const cx=box.x+box.w/2, cy=box.y+box.h/2;
+    box.w=Math.max(minBw,Math.min(maxBw,newW)); box.h=box.w/ratio;
+    box.x=cx-box.w/2; box.y=cy-box.h/2; clampBox(); paintBox();
+  }
+  function relayout(resetFrame){ computeLayout(); if(resetFrame){up.zoom=1;up.dx=0;up.dy=0;} frameToBox(); paintBox(); }
+  relayout(false);
+
+  // ---- pointer interaction (resize handle / pan body / pinch) ----
+  const pts=new Map(); let mode=null, hs=null, ps=null, pinch=null;
+  const rectXY=e=>{ const r=stage.getBoundingClientRect(); return [e.clientX-r.left, e.clientY-r.top]; };
+  stage.addEventListener('pointerdown',e=>{
+    pts.set(e.pointerId,{x:e.clientX,y:e.clientY}); stage.setPointerCapture(e.pointerId);
+    if(pts.size===2){ const a=[...pts.values()]; pinch={d:Math.hypot(a[0].x-a[1].x,a[0].y-a[1].y)||1, w:box.w}; mode='pinch'; return; }
+    const [px,py]=rectXY(e); const h=e.target.closest('[data-h]')||(e.target.classList&&e.target.classList.contains('crophandle')?e.target:null);
+    if(h && h.dataset.hx!==undefined){ const hx=+h.dataset.hx, hy=+h.dataset.hy;
+      const axF=hx===0.5?0.5:1-hx, ayF=hy===0.5?0.5:1-hy;
+      hs={hx,hy,axF,ayF, ax:box.x+axF*box.w, ay:box.y+ayF*box.h}; mode='resize'; }
+    else if(px>=box.x&&px<=box.x+box.w&&py>=box.y&&py<=box.y+box.h){ ps={mx:px,my:py,bx:box.x,by:box.y}; mode='pan'; cbox.style.cursor='grabbing'; }
+    else mode=null;
+  });
+  stage.addEventListener('pointermove',e=>{
+    if(!pts.has(e.pointerId))return; pts.set(e.pointerId,{x:e.clientX,y:e.clientY});
+    if(mode==='pinch'&&pts.size>=2){ const a=[...pts.values()]; resizeCenter(pinch.w*Math.hypot(a[0].x-a[1].x,a[0].y-a[1].y)/pinch.d); return; }
+    const [px,py]=rectXY(e);
+    if(mode==='resize'){
+      let nw;
+      if(hs.hx!==0.5){ nw = hs.hx===1 ? (px-hs.ax) : (hs.ax-px); }
+      else { const nh = hs.hy===1 ? (py-hs.ay) : (hs.ay-py); nw = nh*ratio; }
+      box.w=Math.max(minBw,Math.min(maxBw,nw)); box.h=box.w/ratio;
+      box.x=hs.ax-hs.axF*box.w; box.y=hs.ay-hs.ayF*box.h; clampBox(); paintBox();
+    } else if(mode==='pan'){ box.x=ps.bx+(px-ps.mx); box.y=ps.by+(py-ps.my); clampBox(); paintBox(); }
+  });
+  const rel=e=>{ pts.delete(e.pointerId); cbox.style.cursor='move'; if(pts.size<2&&mode==='pinch')mode=null; if(pts.size===0)mode=null; };
+  stage.addEventListener('pointerup',rel); stage.addEventListener('pointercancel',rel);
+  stage.addEventListener('wheel',e=>{ e.preventDefault(); const cur=maxBw/box.w; resizeCenter(maxBw/Math.max(1,Math.min(3,cur*(1-e.deltaY*0.0012)))); },{passive:false});
+  z.oninput=()=>resizeCenter(maxBw/(+z.value||1));
+
+  const close=revert=>{ if(revert) Object.assign(up,snap); else boxToFrame();
+    ov.remove(); document.removeEventListener('keydown',esc);
+    buildEditor(); regenerate().then(renderPreview); try{MEM.tick();}catch(_){}  persistPhotos();
+  };
+  ov.addEventListener('click',e=>{ if(e.target===ov){ close(true); return; } const b=e.target.closest('[data-a]'); if(!b)return; const a=b.dataset.a;
+    if(a==='rot'){ up.rot=(((up.rot||0)+90)%360); relayout(true); }
+    else if(a==='reset'){ up.rot=0; relayout(true); }
+    else if(a==='cancel') close(true);
+    else if(a==='save') close(false);
+  });
+  const esc=e=>{ if(e.key==='Escape') close(true); else if(e.key==='Enter') close(false); };
+  document.addEventListener('keydown',esc);
+}
+const MK_DEFS=[['jain','Ⓙ','Jain'],['dairy','🥛','Dairy'],['gluten','🌾','Gluten']];
+// interactive J/dairy/gluten chip row. getSet()->Set, setSet(Set) persists.
+function markerChips(getSet, setSet){
+  const row=document.createElement('div'); row.className='markrow';
+  const lbl=document.createElement('span'); lbl.className='mlbl'; lbl.textContent='Markers'; row.appendChild(lbl);
+  MK_DEFS.forEach(([t,emo,name])=>{
+    const c=document.createElement('button'); c.type='button'; c.className='mchip'; c.innerHTML=emo+' '+name;
+    if(getSet().has(t)) c.classList.add('on');
+    c.onclick=()=>{ const s=getSet(); if(s.has(t)) s.delete(t); else s.add(t); setSet(s);
+      c.classList.toggle('on', getSet().has(t)); regenerate().then(renderPreview); };
+    row.appendChild(c);
+  });
+  return row;
+}
+// auto-growing multi-line name field. Enter inserts a line break (never submits); cleanField
+// runs per line so the PDF-font limit still applies; height tracks the number of lines.
+function mkNameField(value, ph, onChange){
+  const ta=document.createElement('textarea'); ta.className='name'; ta.rows=1; ta.spellcheck=false;
+  ta.placeholder=ph; ta.value=value||'';
+  const grow=()=>{ ta.style.height='auto'; ta.style.height=(ta.scrollHeight)+'px'; };
+  ta.addEventListener('input',()=>{
+    const lines=ta.value.split('\n').map(L=>cleanField(L.toUpperCase(),'name'));
+    const v=lines.join('\n');
+    if(ta.value!==v){ const p=ta.selectionStart; ta.value=v; try{ta.setSelectionRange(p,p);}catch(_){}}
+    grow(); onChange(v);
+  });
+  ta.addEventListener('keydown',e=>{ if(e.key==='Enter'){ e.stopPropagation(); } });   // keep newlines
+  requestAnimationFrame(grow); setTimeout(grow,0);
+  return ta;
+}
+// auto-growing multi-line description field. Enter breaks the line exactly where the user puts
+// it and the PDF splice honours that break. cleanField runs PER LINE because the font charset
+// has no '\n' — cleaning the whole value in one pass would silently swallow every newline.
+function mkDescField(value, ph, onChange){
+  const ta=document.createElement('textarea'); ta.className='desc'; ta.rows=1; ta.spellcheck=false;
+  ta.placeholder=ph; ta.value=value||'';
+  const grow=()=>{ ta.style.height='auto'; ta.style.height=(ta.scrollHeight)+'px'; };
+  ta.addEventListener('input',()=>{
+    const v=ta.value.split('\n').map(L=>cleanField(L,'desc')).join('\n');
+    if(ta.value!==v){ const p=ta.selectionStart; ta.value=v; try{ta.setSelectionRange(p,p);}catch(_){}}
+    grow(); onChange(v);
+  });
+  ta.addEventListener('keydown',e=>{ if(e.key==='Enter'){ e.stopPropagation(); } });   // keep newlines
+  requestAnimationFrame(grow); setTimeout(grow,0);
+  return ta;
+}
+// volume field — the number only; the engine re-applies the drink's own "[..ML]" wrapper and case
+function mkVolField(value, onChange){
+  const w=document.createElement('div'); w.className='vol-wrap';
+  const v=document.createElement('input'); v.className='volu'; v.inputMode='numeric';
+  v.placeholder='300'; v.value=value||''; v.title='Serving volume';
+  v.oninput=()=>{ const c=v.value.replace(/[^0-9]/g,''); if(v.value!==c)v.value=c; onChange(c); };
+  const u=document.createElement('span'); u.className='unit'; u.textContent='ML';
+  w.appendChild(v); w.appendChild(u);
+  return w;
+}
+let descCtrs=[];        // per-card line counters, rebuilt by buildEditor() and read by validate()
+function buildEditor(){
+  buildTabs();
+  descCtrs=[];
+  const ed=document.getElementById('editor'); ed.innerHTML='';
+  const pageData=FM.pages.find(p=>p.page===activePage); if(!pageData) return;
+  const hd=document.createElement('div'); hd.className='grouphd sechd'; hd.dataset.sec='DRINKS';
+  const _rmCount=[...removed].filter(k=>k.startsWith(activePage+':')).length, _addCount=(added[activePage]||[]).length;
+  const _vis=pageData.items.length-_rmCount+_addCount;
+  hd.innerHTML='<span>DRINKS</span><span class="n">'+_vis+' items</span>'; ed.appendChild(hd);
+  pageData.items.forEach((it,idx)=>{
+    if(removed.has(K0(activePage,idx))){
+      const strip=document.createElement('div'); strip.className='rmstrip';
+      strip.innerHTML='<span class="rmname">'+esc(val(activePage,idx,'name',it.name)||'(drink)')+'</span><span class="rmtag">removed</span>';
+      const rb=document.createElement('button'); rb.className='restore'; rb.type='button'; rb.textContent='Restore';
+      rb.onclick=()=>{ removed.delete(K0(activePage,idx)); buildEditor(); regenerate().then(renderPreview); };
+      strip.appendChild(rb); ed.appendChild(strip); return;
+    }
+    const card=document.createElement('div'); card.className='card';
+    const nrow=document.createElement('div'); nrow.className='nrow';
+    const name=mkNameField(val(activePage,idx,'name',it.name),'DRINK NAME',v=>{ edits[K(activePage,idx,'name')]=v; validate(); schedulePreview(); });
+    nrow.appendChild(name);
+    const pw=document.createElement('div'); pw.className='price-wrap'; pw.innerHTML='<span class="cur">₹</span>';
+    const price=document.createElement('input'); price.className='price'; price.value=val(activePage,idx,'price',it.price); price.inputMode='numeric';
+    price.oninput=()=>{ const c=price.value.replace(/[^0-9]/g,''); if(price.value!==c)price.value=c; edits[K(activePage,idx,'price')]=c; schedulePreview(); };
+    pw.appendChild(price); nrow.appendChild(pw);
+    if(it.vol_span) nrow.appendChild(mkVolField(val(activePage,idx,'vol',it.vol),
+      c=>{ edits[K(activePage,idx,'vol')]=c; validate(); schedulePreview(); }));
+    const rm=document.createElement('button'); rm.className='rm'; rm.type='button'; rm.title='Remove drink'; rm.textContent='✕';
+    rm.onclick=()=>{ removed.add(K0(activePage,idx)); buildEditor(); regenerate().then(renderPreview); };
+    nrow.appendChild(rm); card.appendChild(nrow);
+    if(it.desc_spans && it.desc_spans.length){
+      card.appendChild(mkDescField(val(activePage,idx,'desc',it.desc),'description',
+        v=>{ edits[K(activePage,idx,'desc')]=v; validate(); schedulePreview(); }));
+      const ctr=document.createElement('div'); ctr.className='ctr'; ctr.style.marginTop='5px';
+      card.appendChild(ctr); descCtrs.push({idx:idx, it:it, el:ctr});
+    }
+    card.appendChild(markerChips(
+      ()=>drinkMarkerSet(activePage,idx,it),
+      (s)=>{ markerEdits[K0(activePage,idx)]=[...s]; try{MEM.tick();}catch(_){} }
+    ));
+    card.appendChild(photoUploadBtn(K0(activePage,idx)));
+    { const _a=photoAdjustUI(K0(activePage,idx)); if(_a) card.appendChild(_a); }
+    ed.appendChild(card);
+  });
+  // --- added (new) drinks + the Add button ---
+  const addList=added[activePage]||(added[activePage]=[]);
+  addList.forEach((dr,ai)=>{
+    const card=document.createElement('div'); card.className='card'; card.style.borderColor='var(--aiko-line)';
+    const nrow=document.createElement('div'); nrow.className='nrow';
+    const name=mkNameField(dr.name||'','NEW DRINK',v=>{ dr.name=v; schedulePreview(); });
+    nrow.appendChild(name);
+    const pw=document.createElement('div'); pw.className='price-wrap'; pw.innerHTML='<span class="cur">₹</span>';
+    const price=document.createElement('input'); price.className='price'; price.value=dr.price||''; price.inputMode='numeric'; price.placeholder='300';
+    price.oninput=()=>{ const c=price.value.replace(/[^0-9]/g,''); if(price.value!==c)price.value=c; dr.price=c; schedulePreview(); };
+    pw.appendChild(price); nrow.appendChild(pw);
+    nrow.appendChild(mkVolField(dr.vol||'', c=>{ dr.vol=c; schedulePreview(); }));
+    const rm=document.createElement('button'); rm.className='rm'; rm.type='button'; rm.title='Discard'; rm.textContent='✕';
+    rm.onclick=()=>{ addList.splice(ai,1); buildEditor(); regenerate().then(renderPreview); };
+    nrow.appendChild(rm); card.appendChild(nrow);
+    card.appendChild(mkDescField(dr.desc||'','description', v=>{ dr.desc=v; schedulePreview(); }));
+    dr.markers=dr.markers||[];
+    card.appendChild(markerChips(
+      ()=>new Set(dr.markers),
+      (s)=>{ dr.markers=[...s]; try{MEM.tick();}catch(_){} }
+    ));
+    card.appendChild(photoUploadBtn(activePage+':add:'+ai));
+    { const _a=photoAdjustUI(activePage+':add:'+ai); if(_a) card.appendChild(_a); }
+    ed.appendChild(card);
+  });
+  // free space = total height (pitch) of removed drinks on this page; each new drink needs ~48pt
+    const maxAdd=[...removed].filter(k=>k.startsWith(activePage+':')).length;   // one removal frees exactly one row
+  const zone=document.createElement('div'); zone.style.cssText='margin:8px 2px 30px';
+  const btn=document.createElement('button'); btn.className='addbtn';
+  btn.style.cssText='width:100%;padding:12px;border:1px dashed var(--line2);border-radius:11px;color:var(--cream-dim);font:inherit;font-size:13px;background:transparent';
+  if(addList.length<maxAdd){ btn.textContent='+  Add drink  ('+(maxAdd-addList.length)+' slot'+(maxAdd-addList.length>1?'s':'')+' free)';
+    btn.onclick=()=>{ addList.push({name:'',desc:'',price:'',vol:'',markers:[]}); buildEditor(); const cards=document.querySelectorAll('#editor .card'); const last=cards[cards.length-1]; const f=last&&last.querySelector('.name'); if(f)f.focus(); };
+  } else { btn.textContent='Remove a drink to free a slot for a new one'; btn.style.opacity='.5'; btn.style.cursor='default'; btn.disabled=true; }
+  zone.appendChild(btn); ed.appendChild(zone);
+  validate();
+  if(typeof syncRail==='function') syncRail();
+}
+// Was a stub that always said "All clear" — which is why an over-long description used to lose
+// its tail with Export still enabled. Now it reports the real line budget per drink and warns
+// when the inline volume would run into the price column. These are LAYOUT warnings, not corrupt
+// output, so Export stays enabled: the point is to make overflow loud, not to block work.
+function validate(){
+  let bad=0;
+  descCtrs.forEach(c=>{
+    const r=descRender(activePage,c.idx,c.it);
+    const cap=Math.max(1,descCapacity(c.it));
+    const n=r? r.lines.length : (c.it.desc_spans||[]).length;
+    let over=false, msg=n+' / '+cap+' line'+(cap===1?'':'s');
+    // distinguish "your line break had nowhere to go" from "this line is genuinely too long" —
+    // on tight rows the artwork simply has no gap for another line, and joining is not overflow
+    if(r&&r.joined){ over=true; msg+=' — no room for another line, joined'; }
+    if(r&&r.wide){ over=true; msg+=' — line too long for the column'; }
+    // the volume rides at the end of the last line; flag it running into the price
+    if(r && c.it.vol_span && c.it.vol_pos && c.it.price_pos){
+      const p=volPlace(c.it,r.lines);
+      const vv=val(activePage,c.idx,'vol',c.it.vol)||'';
+      const w=((c.it.vol_pre||'')+vv+(c.it.vol_suf||'')).length*DESC_ADV*(c.it.vol_pos.size||5);
+      if(Math.abs(p.y-c.it.price_pos.y)<2 && p.x+w>c.it.price_pos.x-2){ over=true; msg+=' — volume hits the price'; }
+    }
+    c.el.textContent=msg; c.el.classList.toggle('over',over);
+    if(over) bad++;
+  });
+  const pill=document.getElementById('flagpill');
+  if(bad){ pill.className='pill warn'; pill.textContent=bad+' drink'+(bad>1?'s':'')+' overflowing'; }
+  else { pill.className='pill ok'; pill.textContent='All clear'; }
+  document.getElementById('export').disabled=false;
+}
+document.getElementById('export').addEventListener('click', async()=>{ const bytes=await regenerate(); const blob=new Blob([bytes],{type:'application/pdf'}); const url=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url; a.download=BRAND.download; a.click(); URL.revokeObjectURL(url); try{MEM.snapshot('export');}catch(_){} showChucky(BRAND.download); });
+// Save = keep this menu as a NAMED version (with its own photos) you can reopen/switch to later.
+document.getElementById('savemenu').addEventListener('click', async function(){
+  const b=this; const was=b.textContent;
+  const def='Menu '+new Date().toLocaleDateString(undefined,{month:'short',day:'numeric'})+' '+new Date().toLocaleTimeString(undefined,{hour:'numeric',minute:'2-digit'});
+  const name=prompt('Save this menu as… (reopen or switch anytime from History, bottom-left)', def);
+  if(name===null) return;
+  b.disabled=true; b.textContent='Saving…';
+  const pv='v'+Date.now();
+  try{ MEM.flush(); await savePhotosTo(pv); await savePhotosTo('auto');
+    const dropped=MEM.saveVersion((name.trim()||def), pv);
+    for(const d of dropped) idbDel('photos:'+MEM_BRAND+':'+d);
+  }catch(e){ console.error('save failed',e); }
+  b.textContent='✓ Saved'; setTimeout(()=>{ b.textContent=was; b.disabled=false; }, 1700);
+});
+const CHUCKY_SVG='<svg viewBox="0 0 220 220" fill="none" stroke="currentColor" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round">'
++'<path d="M58 188 C22 188 24 156 48 158" fill="#fff"/>'
++'<path d="M70 200 C34 200 36 150 60 128 C72 117 78 116 86 112 C104 124 124 124 142 114 C150 119 160 126 168 138 C190 168 178 201 138 200 C116 200 92 200 70 200 Z" fill="#fff"/>'
++'<path d="M96 199 q6 6 12 0 M120 199 q6 6 12 0" stroke-width="2.4"/>'
++'<path d="M74 70 L68 30 L94 54 C102 50 118 50 126 56 L152 32 L146 74 C156 96 150 120 110 121 C72 121 64 94 74 70 Z" fill="#fff"/>'
++'<path d="M139 67 L154 58" stroke-width="3.6"/>'
++'<rect x="74" y="64" width="32" height="20" fill="currentColor" stroke="none"/>'
++'<rect x="112" y="62" width="28" height="17" fill="currentColor" stroke="none"/>'
++'<rect x="103" y="69" width="10" height="5" fill="currentColor" stroke="none"/>'
++'<rect x="79" y="78" width="6.5" height="4.5" fill="#fff" stroke="none"/>'
++'<rect x="116" y="74" width="5" height="3.5" fill="#fff" stroke="none"/>'
++'<path d="M106 95 q5 6 10 1" stroke-width="2.6"/>'
++'<path d="M80 85 L56 79 M80 90 L54 91 M82 95 L58 103" stroke-width="2.2"/>'
++'<path d="M150 81 L174 75 M150 86 L176 87 M148 91 L172 99" stroke-width="2.2"/></svg>';
+
+// Cheeky export lines. The pool rotates: the day's starting line changes at LOCAL MIDNIGHT
+// (so it's fresh every day, never stagnant), and advances on each export within the session.
+const CHUCKY_LINES=[
+ "KILLED IT 😎","NAILED IT.","CHEF’S KISS 🤌","MENU SLAPS.","COOKED. LITERALLY.","SERVED 🍽️",
+ "TOO COOL FOR THE KITCHEN.","CRISPY.","MIC DROP 🎤","FLAWLESS VICTORY.","BOOM. PLATED.","CERTIFIED BANGER.",
+ "SHARPER THAN MY SHADES.","PURR-FECTION 🐾","ATE. NO CRUMBS.","HOT OUT THE OVEN.","CLEAN LIKE MY WHISKERS.",
+ "BIG CHEF ENERGY.","WHISKED IT, RISKED IT, KILLED IT.","ANOTHER ONE. 🐾","DEVOURED.","SMOOTH OPERATOR.",
+ "ICE COLD 🧊","THAT’S A WRAP.","SEASONED TO PERFECTION.","SLAYED THE PLATE.","FRESH OUTTA THE LAB.",
+ "CRUSHED IT.","GORDON WHO?","WORLD-CLASS, BABY.","SIZZLIN’.","DROPPED A BANGER.","NO NOTES.",
+ "ABSOLUTELY COOKED.","TOP TIER.","MASTERPIECE.","EXPORTED & FLEXED.","LOCKED IN 🔒","UNDEFEATED.",
+ "SAUCY.","GO OFF, CHEF.","LEGENDARY.","SHADES ON, MENU DONE.","EASY. 😼"
+];
+let _chuckyN=0;
+function chuckyLine(){
+  const n=new Date();
+  const day=Math.floor(new Date(n.getFullYear(),n.getMonth(),n.getDate()).getTime()/86400000);  // local-midnight day index
+  const i=((day*7 + _chuckyN++)%CHUCKY_LINES.length + CHUCKY_LINES.length)%CHUCKY_LINES.length;
+  return CHUCKY_LINES[i];
+}
+function showChucky(fn){
+  const el=document.getElementById('celebrate'); if(!el) return;
+  el.querySelector('.cbline').textContent=chuckyLine();
+  el.querySelector('.cbsub').textContent=(fn||'menu')+' — exported';
+  el.classList.remove('on'); void el.offsetWidth; el.classList.add('on');
+  clearTimeout(showChucky._t); showChucky._t=setTimeout(()=>el.classList.remove('on'),2700);
+}
+// Chucky's sassy greeting — new on every load AND shifts at local midnight
+const CHUCKY_GREET=[
+ "How can I help you today, you non-skilled human?","Oh. It's you again. Let's fix this menu.",
+ "I brought the shades. You bring the typos.","Point. Click. Let me carry you.",
+ "90% attitude, 10% PDF surgeon. Let's go.","Try not to break anything. I'm watching. 😎",
+ "Cleaner. Shorter. Better. Sound familiar?","Cool cats edit fast. Keep up.",
+ "I do the hard part. You take the credit.","Ready when you are, slowpoke.",
+ "I've seen worse menus. Barely.","Sit. Stay. Watch a professional work.",
+ "Another menu you couldn't handle alone? Adorable.","Relax, human. The cat's got it."
+];
+function chuckyGreet(){
+  const n=new Date(); const day=Math.floor(new Date(n.getFullYear(),n.getMonth(),n.getDate()).getTime()/86400000);
+  let c=+(sessionStorage.getItem('chucky_g')||0); sessionStorage.setItem('chucky_g',c+1);
+  return CHUCKY_GREET[((day*5+c)%CHUCKY_GREET.length+CHUCKY_GREET.length)%CHUCKY_GREET.length];
+}
+function sayChucky(msg, ms){
+  const s=document.getElementById('chuckysay'); if(!s) return;
+  s.textContent=msg||chuckyGreet();
+  s.classList.remove('on'); void s.offsetWidth; s.classList.add('on');
+  clearTimeout(sayChucky._t); if(ms!==0) sayChucky._t=setTimeout(()=>s.classList.remove('on'), ms||6000);
+}
+(function(){
+  const o=document.createElement('div'); o.id='celebrate';
+  o.innerHTML='<div class="cbcard"><div class="cbcat">'+CHUCKY_SVG+'</div><div class="cbline"></div><div class="cbsub"></div></div>';
+  o.addEventListener('click',()=>o.classList.remove('on'));
+  document.body.appendChild(o);
+  const say=document.createElement('div'); say.id='chuckysay';
+  say.addEventListener('click',()=>say.classList.remove('on'));
+  document.body.appendChild(say);
+  const b=document.querySelector('.brand');
+  if(b){ const a=document.createElement('a'); a.className='homelink'; a.href='/chucky/'; a.title='Back to menu picker';
+    a.innerHTML='<span class="bhint">↩</span>'+CHUCKY_SVG.replace('<svg ','<svg class="chucky" ')+'<span class="ctag">CHUCKY</span>';
+    b.insertBefore(a,b.firstChild);
+  }
+  setTimeout(()=>sayChucky(),1200);   // greet shortly after load
+})();
+
+// ---------- boot ----------
+
+// ---- edit-memory glue (capiche-surat) ----
+const MEM_BRAND='capiche-ahm';
+let memBaseVer='';
+function photoManifest(){ const o={}; for(const k in photoUploads){ const u=photoUploads[k]; if(u&&u.bytes) o[k]={zoom:u.zoom,dx:u.dx,dy:u.dy,rot:u.rot}; } return o; }
+// crop manifest (no bytes) is in the snapshot so a PHOTO-ONLY change is detected as unsaved (triggers
+// the autosave/resume banner); the actual image bytes live in IndexedDB and are reloaded on resume.
+function memSnapshot(){ return { edits:{...edits}, removed:[...removed], added:JSON.parse(JSON.stringify(added)), markerEdits:JSON.parse(JSON.stringify(markerEdits)), photos:photoManifest() }; }
+function memApply(st){ edits=(st&&st.edits)?{...st.edits}:{}; removed=new Set((st&&st.removed)||[]); added=(st&&st.added)?JSON.parse(JSON.stringify(st.added)):{}; markerEdits=(st&&st.markerEdits)?JSON.parse(JSON.stringify(st.markerEdits)):{}; }
+let _restoreSlot='auto';
+async function memRebuild(){ photoUploads={}; try{ await loadPhotosFrom(_restoreSlot||'auto'); }catch(_){} _restoreSlot='auto'; buildEditor(); await regenerate(); renderPreview(); }
+// ============ EDIT MEMORY — autosave + resume + version history (per brand) ============
+// Glue each editor must define BEFORE this block:
+//   const MEM_BRAND = 'aiko-drinks';        // unique key
+//   function memSnapshot(){ return {...}; }  // serialisable current edit state (order-stable)
+//   function memApply(state){ ... }          // mutate editor vars from a saved state
+//   function memRebuild(){ ... }             // rebuild UI + regenerate + render after apply
+//   let   memBaseVer = '';                   // fingerprint of the base PDF (for #6 update detection)
+const MEM = (function(){
+  const K='chucky_mem_'+MEM_BRAND, AUTO=K+':auto', SNAPS=K+':snaps';
+  let initial='', timer=null, statusEl=null, panel=null, ready=false;
+  const J=o=>{ try{return JSON.stringify(o);}catch(_){return '';} };
+  const P=s=>{ try{return JSON.parse(s);}catch(_){return null;} };
+  function ago(t){ const s=Math.max(0,(Date.now()-t)/1000);
+    if(s<45) return 'just now'; if(s<3600) return Math.round(s/60)+'m ago';
+    if(s<86400) return Math.round(s/3600)+'h ago'; return Math.round(s/86400)+'d ago'; }
+  const dirty=()=> J(memSnapshot())!==initial;
+  function setStatus(txt,cls){ if(!statusEl)return; statusEl.querySelector('.memtxt').textContent=txt; statusEl.dataset.state=cls||''; statusEl.style.display=txt?'':'none'; }
+  function tick(){
+    if(!ready) return;
+    clearTimeout(timer);
+    if(!dirty()){ try{localStorage.removeItem(AUTO);}catch(_){}; setStatus('',''); return; }
+    setStatus('Saving…','saving');
+    timer=setTimeout(()=>{ try{ localStorage.setItem(AUTO, J({t:Date.now(), base:memBaseVer, s:memSnapshot()})); setStatus('Saved','ok'); }catch(_){ setStatus('',''); } }, 500);
+  }
+  function snapshot(label){ if(!dirty()) return; try{ const a=P(localStorage.getItem(SNAPS))||[];
+    a.unshift({t:Date.now(), label:label||'edit', base:memBaseVer, s:memSnapshot()});
+    localStorage.setItem(SNAPS, J(a.slice(0,12))); }catch(_){} }
+  const snaps=()=> P(localStorage.getItem(SNAPS))||[];
+  // named save-slot: always writes an entry (even if not "dirty") + carries a photo slot id `pv`.
+  // returns pv ids that fell off the end so their IDB photos can be cleaned up.
+  function saveVersion(label, pv){ try{ const a=P(localStorage.getItem(SNAPS))||[];
+    a.unshift({t:Date.now(), label:label||'Saved menu', base:memBaseVer, s:memSnapshot(), pv:pv, named:true});
+    const keep=a.slice(0,24), dropped=a.slice(24);
+    localStorage.setItem(SNAPS, J(keep)); initial=J(memSnapshot()); setStatus('Saved','ok');
+    return dropped.map(v=>v.pv).filter(Boolean);
+  }catch(_){ return []; } }
+  function delVersion(i){ try{ const a=snaps(); const v=a[i]; if(!v) return; a.splice(i,1); localStorage.setItem(SNAPS, J(a));
+    if(v.pv) idbDel('photos:'+MEM_BRAND+':'+v.pv); renderPanel(); }catch(_){} }
+  function restore(state){ try{ memApply(state); memRebuild(); }catch(e){ console.error('restore failed',e); } tick(); }
+  // ---------- UI ----------
+  function build(){
+    if(document.getElementById('memwrap')) return;
+    const css=document.createElement('style'); css.textContent=`
+    #memwrap{position:fixed;left:16px;bottom:16px;z-index:60;font:12px/1.4 var(--mono,ui-monospace,monospace)}
+    #memstat{display:none;align-items:center;gap:7px;background:rgba(20,18,12,.92);color:#CFC6B4;border:1px solid rgba(244,236,221,.16);
+      border-radius:999px;padding:6px 12px;cursor:pointer;backdrop-filter:blur(6px);user-select:none;box-shadow:0 10px 30px -14px #000}
+    #memstat:hover{border-color:rgba(244,236,221,.34)}
+    #memstat .dot{width:7px;height:7px;border-radius:50%;background:#8F8676;flex:none}
+    #memstat[data-state=ok] .dot{background:#7BC96F} #memstat[data-state=saving] .dot{background:#E0A44A;animation:mempulse 1s infinite}
+    @keyframes mempulse{50%{opacity:.35}}
+    #mempanel{display:none;position:absolute;left:0;bottom:42px;width:280px;max-height:340px;overflow:auto;background:rgba(18,16,11,.98);
+      border:1px solid rgba(244,236,221,.16);border-radius:12px;padding:10px;box-shadow:0 24px 60px -24px #000}
+    #mempanel.on{display:block} #mempanel h4{margin:2px 4px 8px;font-size:10px;letter-spacing:.2em;text-transform:uppercase;color:#8F8676;font-weight:600}
+    .memrow{display:flex;align-items:center;gap:8px;padding:7px 8px;border-radius:8px;cursor:pointer;color:#CFC6B4}
+    .memrow:hover{background:rgba(244,236,221,.07)} .memrow .ml{flex:1;min-width:0} .memrow .mt{font-size:10.5px;color:#8F8676}
+    .memrow .mr{font-size:10px;color:#8F8676} .memrow.empty{color:#6f6858;cursor:default}
+    .mdel{margin-left:6px;flex:none;border:none;background:transparent;color:#6f6858;font-size:15px;line-height:1;cursor:pointer;padding:2px 5px;border-radius:6px}
+    .mdel:hover{color:#F0616B;background:rgba(240,97,107,.12)}
+    #membar{position:fixed;left:0;right:0;top:0;z-index:70;display:none;align-items:center;justify-content:center;gap:14px;
+      padding:10px 16px;background:linear-gradient(90deg,#2A1F12,#1c150c);border-bottom:1px solid rgba(224,164,74,.4);
+      color:#F4ECDD;font:13px/1.4 var(--mono,ui-monospace,monospace);box-shadow:0 8px 24px -12px #000}
+    #membar.on{display:flex} #membar b{color:#E0A44A}
+    #membar button{font:inherit;font-size:12px;padding:5px 13px;border-radius:8px;cursor:pointer;border:1px solid rgba(244,236,221,.28);background:transparent;color:#F4ECDD}
+    #membar button.pri{background:#E0A44A;border-color:#E0A44A;color:#1a1508;font-weight:600}
+    #membar button:hover{filter:brightness(1.1)}
+    @media(max-width:640px){#memwrap{left:10px;bottom:10px}#mempanel{width:min(280px,86vw)}}`;
+    document.head.appendChild(css);
+    const wrap=document.createElement('div'); wrap.id='memwrap';
+    wrap.innerHTML='<div id="memstat" title="Edit memory — click for history"><span class="dot"></span><span class="memtxt"></span> · History</div><div id="mempanel"></div>';
+    document.body.appendChild(wrap);
+    const bar=document.createElement('div'); bar.id='membar'; document.body.appendChild(bar);
+    statusEl=document.getElementById('memstat'); panel=document.getElementById('mempanel');
+    statusEl.addEventListener('click',togglePanel);
+    document.addEventListener('click',e=>{ if(panel&&!wrap.contains(e.target)) panel.classList.remove('on'); });
+  }
+  function togglePanel(e){ e&&e.stopPropagation(); if(!panel)return; const open=!panel.classList.contains('on'); if(open)renderPanel(); panel.classList.toggle('on',open); }
+  function renderPanel(){
+    const list=snaps(); let h='<h4>Saved menus</h4>';
+    if(!list.length) h+='<div class="memrow empty">No saved menus yet.<br>Click <b>Save</b> to keep one you can reopen.</div>';
+    else list.forEach((v,i)=>{ h+='<div class="memrow" data-i="'+i+'"><span class="ml"><div>'+(v.named?'📑 ':'')+esc(v.label)+'</div><div class="mt">'+ago(v.t)+(v.base!==memBaseVer?' · older menu':'')+'</div></span>'
+      +'<span class="mr">open</span><button class="mdel" title="Delete this saved menu" data-d="'+i+'">×</button></div>'; });
+    panel.innerHTML=h;
+    panel.querySelectorAll('.mdel').forEach(b=>b.addEventListener('click',e=>{ e.stopPropagation(); if(confirm('Delete this saved menu? This cannot be undone.')) delVersion(+b.dataset.d); }));
+    panel.querySelectorAll('.memrow[data-i]').forEach(r=>r.addEventListener('click',e=>{ if(e.target.closest('.mdel'))return; const v=snaps()[+r.dataset.i]; if(!v)return;
+      if(dirty() && !confirm('Open “'+v.label+'”? Unsaved changes will be lost — Save first if you want to keep them.')) return;
+      _restoreSlot=v.pv||'auto'; restore(v.s); panel.classList.remove('on'); }));
+  }
+  function esc(s){ return (s+'').replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
+  function checkResume(){
+    const a=P(localStorage.getItem(AUTO)); if(!a||!a.s||J(a.s)===initial) return;
+    const bar=document.getElementById('membar'); if(!bar) return;
+    const stale=a.base && memBaseVer && a.base!==memBaseVer;
+    bar.innerHTML='<span>'+(stale?'You have edits from a <b>previous version</b> of this menu ('+ago(a.t)+').':'You left <b>unsaved edits</b> here '+ago(a.t)+'.')+'</span>'
+      +'<button class="pri" id="memres">Resume them</button><button id="memfresh">Start fresh</button>';
+    bar.classList.add('on');
+    bar.querySelector('#memres').addEventListener('click',()=>{ restore(a.s); bar.classList.remove('on'); });
+    bar.querySelector('#memfresh').addEventListener('click',()=>{ try{localStorage.removeItem(AUTO);}catch(_){}; try{photoUploads={};idbSet('photos:'+MEM_BRAND+':auto',{});}catch(_){}; bar.classList.remove('on'); buildEditor(); regenerate().then(renderPreview); tick(); });
+  }
+  function flush(){ try{ localStorage.setItem(AUTO, J({t:Date.now(), base:memBaseVer, s:memSnapshot()})); }catch(_){}}
+  function init(){ try{ initial=J(memSnapshot()); }catch(_){ initial=''; } ready=true; build(); checkResume(); }
+  return { init, tick, snapshot, restore, ago, flush, saveVersion, count:()=>snaps().length };
+})();
+
+
+
+async function boot(){
+  try{
+    FM=await (await fetch('fieldmap.json?v='+Date.now())).json(); activePage=FM.menu_pages[0];
+    try{ const [bw,cw]=await Promise.all([fetch('base_words.json?v='+Date.now()).then(r=>r.json()),fetch('culinary.json?v='+Date.now()).then(r=>r.json())]); BASE=new Set(bw);CULINARY=new Set(cw);BASE_LIST=bw;CULINARY_LIST=cw; }catch(_){}
+    document.getElementById('bootmsg').textContent='Loading your menu…';
+    pdfBytesOrig=new Uint8Array(await (await fetch(BRAND.pdf+'?v='+Date.now())).arrayBuffer()); memBaseVer='v'+pdfBytesOrig.length;
+    doc=await PDFDocument.load(pdfBytesOrig);
+    for(let p=0;p<doc.getPageCount();p++){ const page=doc.getPage(p); const ref=page.node.get(PDFName.of('Contents')); const stream=doc.context.lookup(ref); pageStreams.push({ref,dict:stream.dict,pristine:stream.contents.slice()}); }
+    buildEditor(); try{MEM.init();}catch(e){console.error(e);} await regenerate(); await renderPreview();
+    document.getElementById('boot').style.display='none'; setTimeout(()=>{ if(typeof sayChucky==='function') sayChucky(); },650);
+  }catch(e){ document.getElementById('bootmsg').innerHTML='Couldn’t load. It needs to be <b>served</b>. <br>'+esc(String(e)); console.error(e); }
+}
+function syncRail(){ const rail=document.getElementById('rail'); if(!rail)return; }
+function filterItems(q){ q=(q||'').trim().toLowerCase(); document.querySelectorAll('#editor .card').forEach(c=>{ const t=((c.querySelector('.name')?.value||'')+' '+(c.querySelector('.desc')?.value||'')).toLowerCase(); c.style.display=(!q||t.includes(q))?'':'none'; }); }
+document.getElementById('q').addEventListener('input',e=>filterItems(e.target.value));
+boot();
+</script><script>
+// ===== REPORT A BUG -> /api/bug (attaches a preview snapshot + current edit state) =====
+(function(){
+  if(document.getElementById('bugbtn')) return;
+  const css=document.createElement('style'); css.textContent=`
+  #bugbtn{position:fixed;right:16px;bottom:16px;z-index:62;background:rgba(20,18,12,.92);color:#CFC6B4;border:1px solid rgba(244,236,221,.16);border-radius:999px;padding:7px 13px;font:12px/1.4 ui-monospace,monospace;cursor:pointer;backdrop-filter:blur(6px);box-shadow:0 10px 30px -14px #000}
+  #bugbtn:hover{border-color:rgba(240,97,107,.6);color:#F0616B}
+  #bugmodal{position:fixed;inset:0;z-index:82;display:none;align-items:center;justify-content:center;background:rgba(0,0,0,.55);padding:16px}
+  #bugmodal.on{display:flex}
+  #bugcard{width:min(460px,94vw);background:#17150f;border:1px solid rgba(244,236,221,.18);border-radius:14px;padding:18px;font-family:ui-monospace,monospace;color:#F4ECDD;box-shadow:0 30px 70px -24px #000}
+  #bugcard h3{margin:0 0 4px;font-size:15px}#bugcard p{margin:0 0 12px;font-size:11.5px;color:#8F8676;line-height:1.5}
+  #bugcard textarea{width:100%;min-height:92px;background:#0f0d08;border:1px solid rgba(244,236,221,.18);border-radius:9px;color:#F4ECDD;font:inherit;font-size:13px;padding:10px;resize:vertical;box-sizing:border-box}
+  #bugcard .r{display:flex;gap:8px;justify-content:flex-end;margin-top:12px;align-items:center}
+  #bugcard button{font:inherit;font-size:12px;padding:7px 14px;border-radius:8px;cursor:pointer;border:1px solid rgba(244,236,221,.28);background:transparent;color:#F4ECDD}
+  #bugcard button.pri{background:#F0616B;border-color:#F0616B;color:#1a0c0d;font-weight:600}
+  #bugshot{font-size:11px;color:#7BC96F;margin-top:8px;flex:1;text-align:left}`;
+  document.head.appendChild(css);
+  const btn=document.createElement('div'); btn.id='bugbtn'; btn.textContent='🐞 Report a bug'; document.body.appendChild(btn);
+  const modal=document.createElement('div'); modal.id='bugmodal';
+  modal.innerHTML='<div id="bugcard"><h3>Report a bug</h3><p>Describe what looks wrong. A snapshot of the current preview and your edits are attached, so it can be reproduced and fixed without you re-doing anything.</p><textarea id="bugdesc" placeholder="e.g. after removing a drink and adding one, the new drink overlaps the last line"></textarea><div class="r"><span id="bugshot"></span><button id="bugcancel">Cancel</button><button class="pri" id="bugsend">Send report</button></div></div>';
+  document.body.appendChild(modal);
+  const snap=()=>{ try{ const c=document.getElementById('preview'); if(c&&c.width) return c.toDataURL('image/jpeg',0.5); }catch(_){} return null; };
+  btn.onclick=()=>{ modal.classList.add('on'); document.getElementById('bugshot').textContent = snap()?'✓ preview snapshot attached':''; document.getElementById('bugdesc').focus(); };
+  const close=()=>modal.classList.remove('on');
+  document.getElementById('bugcancel').onclick=close;
+  modal.addEventListener('click',e=>{ if(e.target===modal) close(); });
+  document.getElementById('bugsend').onclick=async()=>{
+    const desc=document.getElementById('bugdesc').value.trim(); if(!desc){ document.getElementById('bugdesc').focus(); return; }
+    const sb=document.getElementById('bugsend'); sb.textContent='Sending…'; sb.disabled=true;
+    let state=null; try{ if(typeof memSnapshot==='function') state=memSnapshot(); }catch(_){}
+    const payload={ editor:(typeof MEM_BRAND!=='undefined'?MEM_BRAND:location.pathname), page:(typeof activePage!=='undefined'?activePage:null), desc, url:location.href, state, shot:snap() };
+    try{ const r=await fetch('/api/bug',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(payload)}); const j=await r.json();
+      if(j.ok){ sb.textContent='Sent ✓'; setTimeout(()=>{ close(); sb.textContent='Send report'; sb.disabled=false; document.getElementById('bugdesc').value=''; },1000); }
+      else { sb.textContent='Failed'; sb.disabled=false; }
+    }catch(e){ sb.textContent='Failed — offline?'; sb.disabled=false; }
+  };
+})();
+
+</script>
+</body></html>

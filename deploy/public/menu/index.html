@@ -1,0 +1,137 @@
+<!doctype html><html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Secret Menu · Bookends</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Lora:ital,wght@0,400;0,500;0,600;1,400&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root{--ink:#0E0D0B;--panel:#161410;--card:#1E1B15;--cream:#F4ECDD;--cream2:#E9DEC8;--cream-dim:#CFC6B4;--red:#FF2A1A;--gold:#E0B020;--muted:#8F8676;--line:rgba(244,236,221,.10);--line2:rgba(244,236,221,.18);}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%}
+body{background:var(--ink);color:var(--cream);font-family:'Lora',Georgia,serif;overflow:hidden;-webkit-font-smoothing:antialiased}
+.mono{font-family:'DM Mono',ui-monospace,monospace;letter-spacing:.04em}
+.field{position:fixed;inset:0;z-index:0;background:radial-gradient(60% 50% at 50% 8%, rgba(224,176,32,.10), transparent 70%),radial-gradient(50% 40% at 85% 95%, rgba(255,42,26,.08), transparent 70%),radial-gradient(40% 40% at 12% 88%, rgba(224,176,32,.05), transparent 70%);animation:breathe 14s ease-in-out infinite}
+@keyframes breathe{0%,100%{opacity:.85;transform:scale(1)}50%{opacity:1;transform:scale(1.04)}}
+.grain{position:fixed;inset:0;z-index:1;opacity:.04;pointer-events:none;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E")}
+.wrap{position:relative;z-index:2;height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:24px}
+.back{position:fixed;top:16px;left:18px;z-index:3;font-size:12px;color:#8c8579;text-decoration:none;font-family:'DM Mono',monospace;letter-spacing:.08em}
+.back:hover{color:var(--cream)}
+.hero{text-align:center}
+.title{font-size:clamp(38px,8vw,86px);font-weight:600;font-style:italic;line-height:.95;opacity:0;transform:translateY(14px);animation:up .8s ease .1s forwards}
+.kicker{margin-top:.9rem;font-size:clamp(11px,1.5vw,13px);color:var(--muted);text-transform:uppercase;letter-spacing:.34em;opacity:0;animation:fade .8s ease .45s forwards}
+@keyframes up{to{opacity:1;transform:translateY(0)}}
+@keyframes fade{to{opacity:1}}
+.tiles{margin-top:2.6rem;display:grid;grid-template-columns:1fr 1fr;gap:20px;width:min(720px,92vw);perspective:1200px}
+@media(max-width:560px){.tiles{grid-template-columns:1fr}}
+@media(max-width:560px),(max-height:640px){body{overflow:auto}.wrap{height:auto;min-height:100%;justify-content:flex-start;padding:60px 18px 40px}}
+.tile{position:relative;display:flex;flex-direction:column;justify-content:space-between;min-height:190px;text-decoration:none;color:var(--cream);cursor:pointer;
+ border:1px solid var(--line);border-radius:14px;padding:26px 24px 22px;background:var(--card);
+ overflow:hidden;opacity:0;transform:translateY(16px);transition:transform .3s cubic-bezier(.2,.7,.2,1),border-color .3s,box-shadow .3s}
+.tile:nth-child(1){animation:up .6s ease .4s forwards}.tile:nth-child(2){animation:up .6s ease .55s forwards}
+.tile:hover{transform:translateY(-6px);border-color:var(--ac);box-shadow:0 20px 55px -22px var(--glow)}
+.tile .edge{position:absolute;left:0;top:0;height:100%;width:3px;background:var(--ac);transform:scaleY(0);transform-origin:top;transition:transform .35s}
+.tile:hover .edge{transform:scaleY(1)}
+.tl-ttl{font-size:clamp(28px,4.6vw,42px);font-weight:600;line-height:1;display:flex;align-items:center;gap:10px}
+.lock{font-size:.6em}
+.tl-desc{margin-top:14px;color:var(--cream2);font-size:14px;font-style:italic;line-height:1.4}
+.meta{margin-top:18px;display:flex;justify-content:space-between;align-items:baseline}
+.nm{font-size:12px;letter-spacing:.06em;color:var(--muted)}
+.go{font-size:12px;color:var(--ac);opacity:.5;transform:translateX(-4px);transition:.3s}
+.tile:hover .go{opacity:1;transform:translateX(0)}
+.main{--ac:var(--gold);--glow:rgba(224,176,32,.55)}
+.door{--ac:var(--red);--glow:rgba(255,42,26,.55)}
+/* gate modal */
+#gate{position:fixed;inset:0;z-index:20;display:none;align-items:center;justify-content:center;background:rgba(8,8,6,.72);backdrop-filter:blur(3px)}
+#gate.on{display:flex}
+.gcard{background:#15140f;border:1px solid rgba(224,176,32,.35);border-radius:14px;padding:26px 24px;width:min(360px,88vw);text-align:center;box-shadow:0 24px 60px rgba(0,0,0,.5)}
+.gcard h3{font-style:italic;font-weight:600;font-size:22px;margin-bottom:4px}
+.gcard .gh{font-size:11.5px;color:#8c8579;font-family:'DM Mono',monospace;margin-bottom:16px}
+.gcard form{display:flex;gap:8px;border:1px solid rgba(244,236,221,.18);border-radius:10px;padding:6px;background:rgba(255,255,255,.02)}
+.gcard input{flex:1;background:transparent;border:0;outline:0;color:var(--cream);font-size:15px;padding:9px 11px;font-family:'DM Mono',monospace;letter-spacing:.12em}
+.gcard input::placeholder{color:#6a655b}
+.gcard button{background:var(--cream);color:var(--ink);border:0;border-radius:7px;padding:0 16px;font-weight:600;font-family:'DM Mono',monospace;font-size:13px;cursor:pointer}
+.gerr{margin-top:10px;font-size:11.5px;color:var(--red);min-height:14px;font-family:'DM Mono',monospace}
+.shake{animation:shake .4s}@keyframes shake{0%,100%{transform:translateX(0)}20%,60%{transform:translateX(-7px)}40%,80%{transform:translateX(7px)}}
+.foot{position:fixed;bottom:16px;left:0;right:0;text-align:center;font-size:11px;color:#544f47;z-index:2;letter-spacing:.05em}
+@media(max-width:560px),(max-height:640px){.foot{position:static;margin-top:26px}}
+
+.ember{position:fixed;z-index:0;width:42vmax;height:42vmax;border-radius:50%;filter:blur(90px);opacity:.14;pointer-events:none}
+.ember.a{background:var(--gold);top:-18vmax;left:-12vmax;animation:drift1 26s ease-in-out infinite}
+.ember.b{background:var(--red);bottom:-20vmax;right:-14vmax;animation:drift2 32s ease-in-out infinite}
+@keyframes drift1{0%,100%{transform:translate(0,0) scale(1)}50%{transform:translate(9vmax,6vmax) scale(1.15)}}
+@keyframes drift2{0%,100%{transform:translate(0,0) scale(1)}50%{transform:translate(-8vmax,-7vmax) scale(1.1)}}
+.tile .sheen{position:absolute;inset:0;pointer-events:none;background:linear-gradient(105deg,transparent 42%,rgba(244,236,221,.09) 50%,transparent 58%);transform:translateX(-130%)}
+.tile:hover .sheen{animation:sheen .9s ease .05s}
+@keyframes sheen{to{transform:translateX(130%)}}
+.tile:focus-visible{outline:2px solid var(--ac);outline-offset:3px}
+.back:focus-visible{outline:2px solid var(--cream);outline-offset:3px;border-radius:4px}
+@media(prefers-reduced-motion:reduce){
+  .field,.ember{animation:none!important}
+  .tile,.title,.kicker{animation-duration:.01s!important;animation-delay:0s!important}
+  .tile .sheen{display:none}
+}
+</style></head>
+<body>
+<div class="field"></div>
+<div class="ember a"></div><div class="ember b"></div>
+<div class="grain"></div>
+<a class="back mono" href="/">↩ Bookends</a>
+<div class="wrap">
+  <div class="hero">
+    <h1 class="title">Secret Menu</h1>
+    <div class="kicker mono">two ways in</div>
+  </div>
+  <div class="tiles">
+    <a class="tile main" href="https://bookends.capichesecretmenu.workers.dev/">
+      <span class="edge"></span><span class="sheen"></span>
+      <div class="tl-ttl">Main Menu</div>
+      <div><div class="tl-desc">The live customer menu.</div>
+      <div class="meta"><span class="nm mono">Open to all</span><span class="go mono">view →</span></div></div>
+    </a>
+    <a class="tile door" id="backdoor" href="https://bookends.capichesecretmenu.workers.dev/the-back-door">
+      <span class="edge"></span><span class="sheen"></span>
+      <div class="tl-ttl">Back Door <span class="lock">🔒</span></div>
+      <div><div class="tl-desc">The hidden entrance.</div>
+      <div class="meta"><span class="nm mono">Staff · passphrase</span><span class="go mono">enter →</span></div></div>
+    </a>
+  </div>
+</div>
+<div id="gate"><div class="gcard">
+  <h3>Back Door</h3><div class="gh">passphrase to continue</div>
+  <form id="gform" autocomplete="off"><input id="pw" type="password" placeholder="passphrase" spellcheck="false" autofocus><button type="submit">ENTER</button></form>
+  <div class="gerr" id="gerr"></div>
+</div></div>
+<div class="foot mono">BOOKENDS · secret menu</div>
+<script>
+const PWHASH="f76660f75ff19a500e061678a57a50c9ad0bba521cb5a2b7d91733c6dbb55855";
+const BACKDOOR="https://bookends.capichesecretmenu.workers.dev/the-back-door";
+const $=s=>document.querySelector(s);
+async function sha256(t){const b=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(t));return [...new Uint8Array(b)].map(x=>x.toString(16).padStart(2,'0')).join('');}
+$('#backdoor').addEventListener('click',e=>{
+  if(sessionStorage.getItem('galley_auth')==='1') return;   // already unlocked → follow the link
+  e.preventDefault(); $('#gate').classList.add('on'); setTimeout(()=>$('#pw').focus(),50);
+});
+$('#gform').addEventListener('submit',async e=>{
+  e.preventDefault(); const h=await sha256($('#pw').value.trim());
+  if(h===PWHASH){ sessionStorage.setItem('galley_auth','1'); location.href=BACKDOOR; }
+  else{ const f=$('#gform'); f.classList.remove('shake'); void f.offsetWidth; f.classList.add('shake'); $('#gerr').textContent='Wrong passphrase — try again'; $('#pw').select(); }
+});
+$('#gate').addEventListener('click',e=>{ if(e.target.id==='gate') $('#gate').classList.remove('on'); });
+
+// pointer-tracked tilt — same feel as the Bookends dashboard
+(function(){
+  if(matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  if(matchMedia('(hover: none)').matches) return;
+  document.querySelectorAll('.tile').forEach(t=>{
+    let raf=0;
+    t.addEventListener('pointermove',e=>{
+      cancelAnimationFrame(raf);
+      raf=requestAnimationFrame(()=>{
+        const r=t.getBoundingClientRect();
+        const px=(e.clientX-r.left)/r.width-.5, py=(e.clientY-r.top)/r.height-.5;
+        t.style.transform='translateY(-6px) rotateX('+(-py*5).toFixed(2)+'deg) rotateY('+(px*6).toFixed(2)+'deg)';
+      });
+    });
+    t.addEventListener('pointerleave',()=>{ cancelAnimationFrame(raf); t.style.transform=''; });
+  });
+})();
+</script></body></html>

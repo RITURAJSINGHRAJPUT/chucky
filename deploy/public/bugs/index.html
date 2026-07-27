@@ -1,0 +1,111 @@
+<!doctype html><html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Chucky · Bug queue</title>
+<style>
+:root{--bg:#100e09;--pane:#17150f;--line:rgba(244,236,221,.14);--ink:#F4ECDD;--dim:#8F8676;--red:#F0616B;--grn:#7BC96F;--amb:#E7B84F;--mono:ui-monospace,SFMono-Regular,Menlo,monospace}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--mono);padding:26px 20px 80px}
+.wrap{max-width:820px;margin:0 auto}
+header{display:flex;align-items:baseline;gap:12px;margin-bottom:4px}
+h1{font-size:20px;margin:0;letter-spacing:.02em}
+.cat{font-size:22px}
+.sub{color:var(--dim);font-size:12.5px;margin:2px 0 20px;line-height:1.5}
+.bar{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:18px;align-items:center}
+.bar button,.filt{font:12px/1 var(--mono);color:var(--ink);background:transparent;border:1px solid var(--line);border-radius:8px;padding:7px 12px;cursor:pointer}
+.filt.on{background:var(--ink);color:#100e09;border-color:var(--ink);font-weight:600}
+.bar button:hover{border-color:var(--red)}
+.count{color:var(--dim);font-size:12px;margin-left:auto}
+.card{background:var(--pane);border:1px solid var(--line);border-radius:13px;padding:15px 16px;margin-bottom:13px;display:flex;gap:14px}
+.card .body{flex:1;min-width:0}
+.top{display:flex;align-items:center;gap:9px;margin-bottom:7px;flex-wrap:wrap}
+.pill{font-size:10.5px;text-transform:uppercase;letter-spacing:.06em;padding:3px 8px;border-radius:999px;font-weight:600}
+.p-new{background:rgba(240,97,107,.16);color:var(--red)}
+.p-fixed{background:rgba(123,201,111,.16);color:var(--grn)}
+.p-auth{background:rgba(231,184,79,.16);color:var(--amb)}
+.p-triaged{background:rgba(143,134,118,.18);color:var(--dim)}
+.ed{font-size:11.5px;color:var(--dim)}
+.when{font-size:11px;color:var(--dim);margin-left:auto}
+.desc{font-size:13.5px;line-height:1.5;white-space:pre-wrap;word-break:break-word;margin:2px 0 8px}
+.note{font-size:12px;line-height:1.5;color:var(--ink);background:#0f0d08;border-left:2px solid var(--grn);border-radius:0 7px 7px 0;padding:8px 11px;margin-top:8px;white-space:pre-wrap}
+.note.auth{border-color:var(--amb)}
+.meta{font-size:11px;color:var(--dim);word-break:break-all}
+.shot{width:132px;flex:none}
+.shot img{width:132px;border-radius:8px;border:1px solid var(--line);display:block;cursor:zoom-in}
+.shot .no{width:132px;height:88px;border:1px dashed var(--line);border-radius:8px;display:flex;align-items:center;justify-content:center;color:var(--dim);font-size:10.5px;text-align:center}
+.acts{display:flex;gap:7px;margin-top:10px;flex-wrap:wrap}
+.acts button{font:11px/1 var(--mono);border:1px solid var(--line);background:transparent;color:var(--dim);border-radius:7px;padding:6px 10px;cursor:pointer}
+.acts button:hover{color:var(--ink);border-color:var(--ink)}
+.empty{color:var(--dim);text-align:center;padding:60px 0;font-size:13px}
+.lay{position:fixed;inset:0;background:rgba(0,0,0,.82);display:none;align-items:center;justify-content:center;z-index:9;padding:20px;cursor:zoom-out}
+.lay.on{display:flex}.lay img{max-width:96vw;max-height:92vh;border-radius:10px}
+a.mono{color:var(--red);text-decoration:none}a.mono:hover{text-decoration:underline}
+</style></head>
+<body><div class="wrap">
+<header><span class="cat">🐱</span><h1>Chucky · Bug queue</h1></header>
+<div class="sub">Reports from the menu editors land here. Claude triages this queue: low-risk fixes it ships on its own and marks <b style="color:var(--grn)">fixed</b>; anything that needs a judgment call it marks <b style="color:var(--amb)">needs&nbsp;auth</b> with a proposed fix for you to approve. You don't have to open a chat.</div>
+<div class="bar">
+  <span class="filt on" data-f="all">All</span>
+  <span class="filt" data-f="new">New</span>
+  <span class="filt" data-f="needs-auth">Needs auth</span>
+  <span class="filt" data-f="fixed">Fixed</span>
+  <button id="refresh">↻ Refresh</button>
+  <button id="rekey">Key</button>
+  <span class="count" id="count"></span>
+</div>
+<div id="list"></div>
+</div>
+<div class="lay" id="lay"><img id="layimg" alt=""></div>
+<script>
+const API=''; let KEY=localStorage.getItem('chucky_bugkey')||''; let FILTER='all'; let BUGS=[];
+function askKey(){ const k=prompt('Enter the bug-queue key (BUG_KEY):', KEY||''); if(k){ KEY=k.trim(); localStorage.setItem('chucky_bugkey',KEY); } }
+if(!KEY) askKey();
+const esc=s=>String(s==null?'':s).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+function ago(t){ const s=(Date.now()-t)/1000; if(s<60)return'just now'; if(s<3600)return Math.floor(s/60)+'m ago'; if(s<86400)return Math.floor(s/3600)+'h ago'; return Math.floor(s/86400)+'d ago'; }
+function pill(st){ const m={'new':['p-new','new'],'fixed':['p-fixed','fixed'],'needs-auth':['p-auth','needs auth'],'triaged':['p-triaged','triaged']}[st]||['p-triaged',st]; return `<span class="pill ${m[0]}">${m[1]}</span>`; }
+async function load(){
+  const el=document.getElementById('list'); el.innerHTML='<div class="empty">Loading…</div>';
+  try{
+    const r=await fetch(`${API}/api/bugs?k=${encodeURIComponent(KEY)}`);
+    if(r.status===403){ el.innerHTML='<div class="empty">Wrong key. Click “Key” to re-enter.</div>'; return; }
+    BUGS=(await r.json()).bugs||[]; render();
+  }catch(e){ el.innerHTML='<div class="empty">Could not reach the API.</div>'; }
+}
+function render(){
+  const el=document.getElementById('list');
+  const rows=BUGS.filter(b=>FILTER==='all'||b.status===FILTER);
+  document.getElementById('count').textContent=`${rows.length} of ${BUGS.length}`;
+  if(!rows.length){ el.innerHTML='<div class="empty">Nothing here. 🐟</div>'; return; }
+  el.innerHTML=rows.map(b=>{
+    const shot=b.shot?`<img src="${b.shot}" data-full="${b.shot}" alt="snapshot">`:`<div class="no">no snapshot</div>`;
+    const note=b.resolution?`<div class="note ${b.status==='needs-auth'?'auth':''}">${b.status==='needs-auth'?'⚠︎ Proposed fix — needs your OK\n':'✓ '}${esc(b.resolution)}</div>`:'';
+    return `<div class="card">
+      <div class="body">
+        <div class="top">${pill(b.status)}<span class="ed">${esc(b.editor||'?')}${b.page!=null?' · p'+b.page:''}</span><span class="when">${ago(b.t)}</span></div>
+        <div class="desc">${esc(b.desc)}</div>
+        ${b.url?`<div class="meta"><a class="mono" href="${esc(b.url)}" target="_blank">open editor ↗</a></div>`:''}
+        ${note}
+        <div class="acts">
+          ${b.status==='needs-auth'?`<button data-act="approve" data-id="${b.id}">✓ Approve fix</button>`:''}
+          ${b.status!=='fixed'?`<button data-act="fixed" data-id="${b.id}">Mark fixed</button>`:''}
+          ${b.status!=='new'?`<button data-act="new" data-id="${b.id}">Reopen</button>`:''}
+        </div>
+      </div>
+      <div class="shot">${shot}</div>
+    </div>`;
+  }).join('');
+}
+document.addEventListener('click',async e=>{
+  const f=e.target.closest('.filt'); if(f){ document.querySelectorAll('.filt').forEach(x=>x.classList.remove('on')); f.classList.add('on'); FILTER=f.dataset.f; render(); return; }
+  const img=e.target.closest('.shot img'); if(img){ document.getElementById('layimg').src=img.dataset.full; document.getElementById('lay').classList.add('on'); return; }
+  if(e.target.id==='lay'||e.target.id==='layimg'){ document.getElementById('lay').classList.remove('on'); return; }
+  const a=e.target.closest('.acts button'); if(a){
+    const id=a.dataset.id, act=a.dataset.act; a.textContent='…';
+    const upd=act==='approve'?{status:'new',approved:true}:{status:act};
+    await fetch(`${API}/api/bug/${id}?k=${encodeURIComponent(KEY)}`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(upd)});
+    load(); return;
+  }
+});
+document.getElementById('refresh').onclick=load;
+document.getElementById('rekey').onclick=()=>{ askKey(); load(); };
+load(); setInterval(load, 60000);
+</script></body></html>

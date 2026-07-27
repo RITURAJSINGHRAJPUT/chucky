@@ -1,0 +1,13 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "bookends-chucky",
+  "compatibility_date": "2025-06-30",
+  "main": "worker.js",
+  "assets": { "directory": "./public", "binding": "ASSETS" },
+  "kv_namespaces": [ { "binding": "BUGS", "id": "53a121594626447e9579fcef063fdd64" } ]
+  // BUG_KEY is NO LONGER committed here. It gates the bug-queue read/update API and used to sit in
+  // this file in clear text, which meant it shipped inside the repo. Set it as a real secret before
+  // the next Cloudflare deploy:   cd deploy && npx wrangler secret put BUG_KEY
+  // (On Netlify it is an environment variable, read via process.env.BUG_KEY.)
+  // Treat the previous value as burned — it lived in plaintext — and set a fresh one.
+}

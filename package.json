@@ -1,0 +1,23 @@
+{
+  "name": "chucky-menu-editors",
+  "version": "1.0.0",
+  "description": "Bookends byte-level PDF menu editors (Cloudflare Worker + static editors)",
+  "private": true,
+  "scripts": {
+    "deploy": "cd deploy && wrangler deploy",
+    "dev": "cd deploy && wrangler dev",
+    "netlify:dev": "netlify dev",
+    "food:build": "node src/capiche/build_food.js",
+    "test:food": "node foodh.js",
+    "test:markers": "node markerh.js",
+    "test:frame": "node framh.js"
+  },
+  "dependencies": {
+    "@netlify/blobs": "^8.1.0",
+    "jsdom": "^29.1.1",
+    "pdf-lib": "^1.17.1"
+  },
+  "devDependencies": {
+    "wrangler": "^4.0.0"
+  }
+}

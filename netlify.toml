@@ -1,0 +1,30 @@
+# Netlify hosting for the Chucky menu editors.
+#
+# The editors are fully static: each fetches only its own fieldmap.json, base_words.json,
+# culinary.json and brand PDF, with pdf-lib / pdf.js coming from cdnjs. So there is NO build step —
+# deploy/public is served verbatim, exactly as the Cloudflare Worker's ASSETS binding served it.
+#
+# The only server-side piece is the bug queue (/api/bug, /api/bugs, /api/bug/:id), ported from
+# deploy/worker.js into netlify/functions/. Those use Functions v2 `config.path` routing, so no
+# redirect rules are needed here.
+#
+# The Cloudflare Worker is untouched and still serves the old workers.dev URL.
+
+[build]
+  publish   = "deploy/public"
+  command   = ""
+  functions = "netlify/functions"
+
+# The PDFs and fieldmaps are cache-busted by the editors themselves (?v=...), and staff are told to
+# hard-refresh after a deploy (CLAUDE.md HARD RULE 7). Keep the HTML uncached so a deploy is visible
+# without waiting on an edge TTL — the editors are one big inline <script>, so a stale shell is
+# exactly the failure mode that wastes the most time.
+[[headers]]
+  for = "/*/index.html"
+  [headers.values]
+    Cache-Control = "no-cache"
+
+[[headers]]
+  for = "/index.html"
+  [headers.values]
+    Cache-Control = "no-cache"
