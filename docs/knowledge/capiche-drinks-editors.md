@@ -106,3 +106,19 @@ Harnesses: `markerh.js` gained `sc.badges`/`sc.specials`, `framh.js` gained the 
 Verified: no-edit stream byte-identical on every page of both editors; 20 scenarios probed for
 starburst/bar/divider counts with an assertion that no divider is ever non-white; render audit at
 175dpi. Backups: `backups/capiche-{ahm,surat}_fieldmap_20260727_195821.json`.
+
+**FIRST-DRINK PHOTO REGEX (2026-07-27).** Asked "specials bar on 1st?" — the SPECIALS chip was
+hidden on ahm p1 LEMON ICED TEA. Root cause was not the bar feature: `reflow_data.py:38`'s photo
+regex required `q / <re> / W n / q / <cm>`, but that page's FIRST tile carries an extra `/GS0 gs`
+line between the `q` and the `cm`, so it never matched. One miss, three symptoms:
+  1. `photo_tile: null` -> `specialsPlace()` returns null, chip hidden (the reported symptom);
+  2. photo UPLOADS silently did nothing — `index.html` guards on `up && it.photo_tile`;
+  3. `photo_span` fell through to MINT MOJITO's, so removing LEMON ICED TEA deleted the NEXT
+     drink's photo and left its own `/Im0` orphaned on the page.
+Fixed the regex (`(?:/GS0 gs\s*\n)?`) and re-derived the mapping in place with
+`src/capdrinks/photo_fix.py` (dry-run default, backup, asserts 1:1 photo<->drink and no duplicate
+spans). Scope was exactly one item: ahm p1 [0]; ahm p2/p3 and all of surat already resolved 1:1.
+Verified: no-edit output still byte-identical on all 4 pages; bar now stamps at y=528.9 on that
+tile; `rm0` now drops `/Im0` and KEEPS `/Im1`. Span convention kept as the other eight — it starts
+at the `re` coordinates, not the wrapping `q`, so a photo delete leaves a stray `q` (pre-existing,
+harmless, nothing pops below it).

@@ -35,7 +35,11 @@ for pg in fm['pages']:
     top_ys=[max(g,key=lambda r:r['y'])['y'] for g in groups]
     # 2) photo blocks (clip-mapped), on-page only. cm may be rotated -> general 6-number affine
     photos=[]
-    for m in re.finditer(r'(-?[\d.]+) (-?[\d.]+) (-?[\d.]+) (-?[\d.]+) re\s*\nW n\s*\nq\s*\n(?:-?[\d.]+ ){5}-?[\d.]+ cm\s*\n(/Im\d+) Do\s*\nQ\s*\nQ', raw):
+    # `(?:/GS0 gs\s*\n)?` — some tiles carry an ExtGState line between the `q` and the `cm`. Without
+    # it, ahm p1's FIRST photo never matched: LEMON ICED TEA got photo_tile=null (which hides the
+    # SPECIALS chip AND silently drops photo uploads, since index.html guards on `up && photo_tile`)
+    # and inherited MINT MOJITO's span, so removing it deleted the NEXT drink's photo.
+    for m in re.finditer(r'(-?[\d.]+) (-?[\d.]+) (-?[\d.]+) (-?[\d.]+) re\s*\nW n\s*\nq\s*\n(?:/GS0 gs\s*\n)?(?:-?[\d.]+ ){5}-?[\d.]+ cm\s*\n(/Im\d+) Do\s*\nQ\s*\nQ', raw):
         x,yy,w,h=map(float,m.group(1,2,3,4))
         yc=yy+h/2
         if -5<=yc<=600 and h<120:  # on-page row tiles (exclude big bleed)
