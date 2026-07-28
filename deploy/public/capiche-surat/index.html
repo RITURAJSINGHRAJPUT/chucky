@@ -265,6 +265,12 @@ input.price:focus{border-color:var(--aiko-line)}
 input.volu{width:48px;background:#100E09;border:1px solid var(--line2);border-radius:7px;color:var(--cream-dim);font-family:var(--mono);font-size:13px;text-align:right;padding:6px 7px;outline:none;font-variant-numeric:tabular-nums}
 input.volu:focus{border-color:var(--aiko-line)}
 .vol-wrap .unit{font-size:11px;color:var(--muted);font-family:var(--mono)}
+/* ---- drag-and-drop reorder ---- */
+.drag-handle{display:flex;align-items:center;justify-content:center;width:20px;flex:none;color:var(--muted);cursor:grab;border-radius:5px;font-size:17px;line-height:1;margin-right:-4px;user-select:none;transition:color .13s;align-self:flex-start;padding-top:3px}
+.drag-handle:hover{color:var(--cream-dim)}
+.drag-handle:active{cursor:grabbing;color:var(--cream)}
+.card.dragging{opacity:.35;transform:scale(.985);border-color:var(--aiko-line)!important}
+.card.drag-over{border-color:var(--aiko)!important;box-shadow:0 0 0 2px var(--aiko-line)!important}
 </style><style>:root{--aiko:#E8382F}</style></head><body>
 <div id="boot"><div class="spin"></div><div class="s" id="bootmsg">Loading…</div></div>
 <header class="bar">
@@ -297,6 +303,7 @@ let _upN=0;
 let markerEdits={};      // K0(page,idx) -> [marker types] override (jain/dairy/gluten) for existing drinks
 let badgeEdits={};       // K0(page,idx) -> bool override for the red NEW starburst
 let specialsEdits={};    // K0(page,idx) -> bool override for the red SPECIALS bar on the photo
+let reorder={};          // page -> [origIdx,...]: reorder[page][slotIdx]=origIdx to display in that slot
 // Grade an uploaded image to match the dark/warm menu theme (canvas). Returns a themed JPEG.
 async function gradeImage(file){
   const url=URL.createObjectURL(file);
@@ -706,9 +713,10 @@ async function regenerate(){
     const ps=pageStreams[mp]; const pageData=FM.pages.find(p=>p.page===mp);
     const PT=new TextDecoder('latin1').decode(ps.pristine);
     let ops=[]; let append='';
+    const getOrigIdx=slotIdx=>(reorder[mp]&&reorder[mp][slotIdx]!=null)?reorder[mp][slotIdx]:slotIdx;
     // 1) removed drinks: collect delete spans + tops
     const delSpans=[]; const removedTops=[];
-    pageData.items.forEach((it,idx)=>{ if(!removed.has(K0(mp,idx))) return;
+    pageData.items.forEach((it,idx)=>{ const origIdx=getOrigIdx(idx); if(!removed.has(K0(mp,origIdx))) return;
       (it.name_spans||[]).forEach(sp=>delSpans.push(sp)); (it.desc_spans||[]).forEach(sp=>delSpans.push(sp));
       if(it.price_span)delSpans.push(it.price_span); if(it.vol_span)delSpans.push(it.vol_span);
       // dairy_span too: on ahm pages 2-3 nine milk icons are in NO extra_spans, so removal used to
@@ -721,8 +729,9 @@ async function regenerate(){
     // marker-edited survivors: delete their baked J + baked dairy so we can restamp the chosen set.
     // Added to delSpans BEFORE reflow so reflowOps won't try to shift the (deleted) baked marks.
     pageData.items.forEach((it,idx)=>{
-      if(removed.has(K0(mp,idx))) return;
-      const touched=(K0(mp,idx) in markerEdits) || (K(mp,idx,'name') in edits);
+      const origIdx=getOrigIdx(idx); const isReordered=origIdx!==idx;
+      if(removed.has(K0(mp,origIdx))) return;
+      const touched=(K0(mp,origIdx) in markerEdits)||(K(mp,origIdx,'name') in edits)||isReordered;
       if(!touched) return;
       if(it.marker_span) delSpans.push(it.marker_span);
       if(it.dairy_span) delSpans.push(it.dairy_span);
@@ -734,11 +743,12 @@ async function regenerate(){
     // toggle. keepState re-emits the white `0 0 0 0 scn` the dividers rely on. Removal still
     // deletes the whole group via extra_spans, which is why this loop skips removed drinks.
     pageData.items.forEach((it,idx)=>{
-      if(removed.has(K0(mp,idx))) return;
-      const _nm=(K(mp,idx,'name') in edits), _mk=(K0(mp,idx) in markerEdits);
-      if(it.badge_span && (!drinkBadge(mp,idx,it) || _nm || _mk)) delSpans.push(it.badge_span);
+      const origIdx=getOrigIdx(idx); const origIt=pageData.items[origIdx]; const isReordered=origIdx!==idx;
+      if(removed.has(K0(mp,origIdx))) return;
+      const _nm=(K(mp,origIdx,'name') in edits)||isReordered, _mk=(K0(mp,origIdx) in markerEdits)||isReordered;
+      if(it.badge_span&&(!drinkBadge(mp,origIdx,origIt)||_nm||_mk)) delSpans.push(it.badge_span);
       // an uploaded photo is appended over photo_tile and would BURY a baked bar, so restamp it
-      if(it.specials_span && (!drinkSpecials(mp,idx,it) || photoUploads[K0(mp,idx)])){
+      if(it.specials_span&&(!drinkSpecials(mp,origIdx,origIt)||photoUploads[K0(mp,origIdx)])){
         delSpans.push(it.specials_span);
         if(it.specials_text_span) delSpans.push(it.specials_text_span);
       }
@@ -755,21 +765,32 @@ async function regenerate(){
     // reflow shift to them by hand instead (see the volume block below).
     const volSkip=[];
     pageData.items.forEach((it,idx)=>{
-      if(removed.has(K0(mp,idx)) || !it.vol_span) return;
-      if((K(mp,idx,'vol') in edits) || (K(mp,idx,'desc') in edits)) volSkip.push(it.vol_span);
+      const origIdx=getOrigIdx(idx); const isReordered=origIdx!==idx;
+      if(removed.has(K0(mp,origIdx))||!it.vol_span) return;
+      if(isReordered||(K(mp,origIdx,'vol') in edits)||(K(mp,origIdx,'desc') in edits)) volSkip.push(it.vol_span);
     });
     // 2) reflow survivors below removed drinks (shift by real heights)
     if(removedTops.length) ops=ops.concat(reflowOps(ps.pristine, removedTops, delSpans.concat(volSkip), rowH));
     const shiftOf=y=> removedTops.filter(t=> t.y>((y||0)+0.5)).reduce((a,t)=>a+t.pitch,0);
     // 3) text edits + prices for survivors
     pageData.items.forEach((it,idx)=>{
-      if(removed.has(K0(mp,idx))) return;
+      const origIdx=getOrigIdx(idx); const origIt=pageData.items[origIdx]; const isReordered=origIdx!==idx;
+      if(removed.has(K0(mp,origIdx))) return;
       const sh=shiftOf(it.top_y);
-      if(K(mp,idx,'name') in edits && it.name_spans.length){
-        const nl=nameToSpans(nameLines(edits[K(mp,idx,'name')]), it.name_spans.length);
-        it.name_spans.forEach((sp,i)=> ops.push({s:sp[0],e:sp[1],rep:enc('('+escPdf(nl[i]||'')+')Tj')}));
+      // name: always splice when reordered; use origIt's content as baked fallback
+      if((isReordered||K(mp,origIdx,'name') in edits)&&it.name_spans.length){
+        const nl=nameToSpans(nameLines(val(mp,origIdx,'name',origIt.name)), it.name_spans.length);
+        it.name_spans.forEach((sp,i)=>ops.push({s:sp[0],e:sp[1],rep:enc('('+escPdf(nl[i]||'')+')Tj')}));
       }
-      const _dr=descRender(mp,idx,it);
+      // description: for a reordered slot with no edit, write origIt's baked desc into this slot's spans
+      let _dr=K(mp,origIdx,'desc') in edits ? descRender(mp,origIdx,origIt) : null;
+      if(_dr) _dr={..._dr, baked:it.desc_spans?it.desc_spans.length:_dr.baked};
+      if(isReordered&&!_dr&&it.desc_spans&&it.desc_spans.length){
+        const cap=Math.max(1,descCapacity(it));
+        let L=descLines(origIt.desc||'',DESC_MC);
+        if(L.length>cap) L=L.slice(0,cap-1).concat([L.slice(cap-1).join(' ')]);
+        _dr={lines:L,joined:false,wide:L.some(l=>l.length>DESC_MC),cap:cap,baked:it.desc_spans.length};
+      }
       if(_dr){
         const B=_dr.baked, L=_dr.lines, lead=it.desc_geom? it.desc_geom.lead : -1.2;
         for(let i=0;i<B;i++){
@@ -781,44 +802,44 @@ async function regenerate(){
         }
       }
       // volume: re-placed when the description re-wraps, not just when the volume is edited
-      if(it.vol_span && it.vol_pos && ((K(mp,idx,'vol') in edits) || _dr)){
-        const vv=val(mp,idx,'vol',it.vol)||'';
-        const vtxt=vv? (it.vol_pre||'')+vv+(it.vol_suf||'') : '';
-        const vp=_dr? volPlace(it,_dr.lines) : {x:it.vol_pos.x, y:it.vol_pos.y};
+      if(it.vol_span&&it.vol_pos&&(isReordered||(K(mp,origIdx,'vol') in edits)||_dr)){
+        const vv=val(mp,origIdx,'vol',origIt.vol)||'';
+        const vtxt=vv?(origIt.vol_pre||'')+vv+(origIt.vol_suf||''):'';
+        const vp=_dr?volPlace(it,_dr.lines):{x:it.vol_pos.x,y:it.vol_pos.y};
         const va=(FM.allowed&&FM.allowed.desc)||'';
-        const vfits=!!vtxt && [...vtxt].every(c=>va.indexOf(c)>=0);
+        const vfits=!!vtxt&&[...vtxt].every(c=>va.indexOf(c)>=0);
         if(vfits) ops.push({s:it.vol_span[0],e:it.vol_span[1],rep:enc('5 0 0 5 '+num(vp.x)+' '+num(vp.y+sh)+' Tm\n('+escPdf(vtxt)+')Tj')});
         else { ops.push({s:it.vol_span[0],e:it.vol_span[1],rep:enc(keepState(PT.slice(it.vol_span[0],it.vol_span[1])))});
-               if(vtxt) append+=volStamp({x:vp.x,y:vp.y+sh,size:it.vol_pos.size}, it.vol_color, vtxt); }
+               if(vtxt) append+=volStamp({x:vp.x,y:vp.y+sh,size:it.vol_pos.size},origIt.vol_color||it.vol_color,vtxt); }
       }
-      if(it.price_span){ const pv=val(mp,idx,'price',it.price);
+      if(it.price_span){ const pv=val(mp,origIdx,'price',origIt.price);
         const pa=(FM.allowed&&FM.allowed.price)||'0235';
         const fits=[...(pv||'')].every(c=>pa.indexOf(c)>=0);
-        if(fits){ if(K(mp,idx,'price') in edits) ops.push({s:it.price_span[0],e:it.price_span[1],rep:enc('('+escPdf(pv)+')Tj')}); }
-        else { ops.push({s:it.price_span[0],e:it.price_span[1],rep:enc('()Tj')}); if(it.price_pos&&pv) append+=priceStamp({x:it.price_pos.x,y:it.price_pos.y+sh,size:it.price_pos.size}, pv); }
+        if(fits){ if(isReordered||K(mp,origIdx,'price') in edits) ops.push({s:it.price_span[0],e:it.price_span[1],rep:enc('('+escPdf(pv)+')Tj')}); }
+        else { ops.push({s:it.price_span[0],e:it.price_span[1],rep:enc('()Tj')}); if(it.price_pos&&pv) append+=priceStamp({x:it.price_pos.x,y:it.price_pos.y+sh,size:it.price_pos.size},pv); }
       }
-      // uploaded photo -> draw over the drink's (shifted) tile
-      const up=photoUploads[K0(mp,idx)];
-      if(up && it.photo_tile){ const t=it.photo_tile; append+=photoDrawOp(up, [t[0], t[1]+sh, t[2], t[3]]); }
-      // markers ALWAYS sit under the whole title: restamp when the name OR the marker set changed.
-      const _nameEd=(K(mp,idx,'name') in edits), _mkEd=(K0(mp,idx) in markerEdits);
-      if((_nameEd || _mkEd) && it.mk_anchor){
-        const set=_mkEd? new Set(markerEdits[K0(mp,idx)]) : drinkMarkerSet(mp,idx,it);
-        const a=_nameEd? editedNameAnchor(it, nameLines(edits[K(mp,idx,'name')]), PT) : it.mk_anchor;
-        append+=stampMarkers(a[0], a[1]+sh, set);
+      // uploaded photo -> draw over the drink's (shifted) tile; keyed by origIdx (photo belongs to the drink)
+      const up=photoUploads[K0(mp,origIdx)];
+      if(up&&it.photo_tile){ const t=it.photo_tile; append+=photoDrawOp(up,[t[0],t[1]+sh,t[2],t[3]]); }
+      // markers ALWAYS sit under the whole title: restamp when name OR marker set changed, or reordered
+      const _nameEd=(K(mp,origIdx,'name') in edits)||isReordered;
+      const _mkEd=(K0(mp,origIdx) in markerEdits)||isReordered;
+      if((_nameEd||_mkEd)&&it.mk_anchor){
+        const set=(K0(mp,origIdx) in markerEdits)?new Set(markerEdits[K0(mp,origIdx)]):drinkMarkerSet(mp,origIdx,origIt);
+        const a=_nameEd?editedNameAnchor(it,nameLines(val(mp,origIdx,'name',origIt.name)),PT):it.mk_anchor;
+        append+=stampMarkers(a[0],a[1]+sh,set);
       }
       // ---- SPECIALS bar. Emitted AFTER photoDrawOp above so an upload can't bury it. ----
-      if(drinkSpecials(mp,idx,it) && (!it.specials_span || up)){
+      if(drinkSpecials(mp,origIdx,origIt)&&(!it.specials_span||up)){
         const _sp=specialsPlace(it);
-        if(_sp) append+=specialsStamp(_sp, sh, pageData.bold_font||'T1_0');
+        if(_sp) append+=specialsStamp(_sp,sh,pageData.bold_font||'T1_0');
       }
       // ---- NEW badge. Restamped whenever the name or markers moved (it packs after the cluster). ----
-      if(drinkBadge(mp,idx,it) && (!it.badge_span || _nameEd || _mkEd)){
-        const _bs=(_nameEd||_mkEd)? new Set(_mkEd? markerEdits[K0(mp,idx)] : [...drinkMarkerSet(mp,idx,it)])
-                                  : drinkMarkerSet(mp,idx,it);
+      if(drinkBadge(mp,origIdx,origIt)&&(!it.badge_span||_nameEd||_mkEd)){
+        const _bs=(K0(mp,origIdx) in markerEdits)?new Set(markerEdits[K0(mp,origIdx)]):drinkMarkerSet(mp,origIdx,origIt);
         // an untouched drink that merely had its badge switched back on lands on the baked position
-        if(it.badge_pos && !_nameEd && !_mkEd) append+=badgeStamp(it.badge_pos[0], it.badge_pos[1]+sh);
-        else { const _bp=badgePlace(it,mp,idx,_bs,PT); if(_bp) append+=badgeStamp(_bp.x, _bp.y+sh); }
+        if(it.badge_pos&&!_nameEd&&!_mkEd) append+=badgeStamp(it.badge_pos[0],it.badge_pos[1]+sh);
+        else { const _bp=badgePlace(it,mp,origIdx,_bs,PT); if(_bp) append+=badgeStamp(_bp.x,_bp.y+sh); }
       }
     });
     // 4) added drinks -> stack into the space freed below the LAST survivor's real content.
@@ -1123,44 +1144,66 @@ function buildEditor(){
   const _rmCount=[...removed].filter(k=>k.startsWith(activePage+':')).length, _addCount=(added[activePage]||[]).length;
   const _vis=pageData.items.length-_rmCount+_addCount;
   hd.innerHTML='<span>DRINKS</span><span class="n">'+_vis+' items</span>'; ed.appendChild(hd);
-  pageData.items.forEach((it,idx)=>{
-    if(removed.has(K0(activePage,idx))){
+  // Ensure reorder is initialised for this page (identity permutation by default)
+  if(!reorder[activePage]||reorder[activePage].length!==pageData.items.length)
+    reorder[activePage]=pageData.items.map((_,i)=>i);
+  const ord=reorder[activePage];  // ord[slotIdx] = origIdx to display in that slot
+  let dragFrom=null;              // slot index currently being dragged
+  pageData.items.forEach((_,slotIdx)=>{
+    const origIdx=ord[slotIdx]??slotIdx; const it=pageData.items[origIdx];
+    if(removed.has(K0(activePage,origIdx))){
       const strip=document.createElement('div'); strip.className='rmstrip';
-      strip.innerHTML='<span class="rmname">'+esc(val(activePage,idx,'name',it.name)||'(drink)')+'</span><span class="rmtag">removed</span>';
+      strip.innerHTML='<span class="rmname">'+esc(val(activePage,origIdx,'name',it.name)||'(drink)')+'</span><span class="rmtag">removed</span>';
       const rb=document.createElement('button'); rb.className='restore'; rb.type='button'; rb.textContent='Restore';
-      rb.onclick=()=>{ removed.delete(K0(activePage,idx)); buildEditor(); regenerate().then(renderPreview); };
+      rb.onclick=()=>{ removed.delete(K0(activePage,origIdx)); buildEditor(); regenerate().then(renderPreview); };
       strip.appendChild(rb); ed.appendChild(strip); return;
     }
     const card=document.createElement('div'); card.className='card';
+    card.dataset.slot=slotIdx;
+    // Drag events — only fire when the drag-handle is the initiating target
+    card.addEventListener('dragstart',e=>{
+      dragFrom=slotIdx; e.dataTransfer.effectAllowed='move'; e.dataTransfer.setData('text/plain',String(slotIdx));
+      setTimeout(()=>card.classList.add('dragging'),0);
+    });
+    card.addEventListener('dragend',()=>{ card.classList.remove('dragging'); card.draggable=false; dragFrom=null; ed.querySelectorAll('.card.drag-over').forEach(c=>c.classList.remove('drag-over')); });
+    card.addEventListener('dragover',e=>{ e.preventDefault(); e.dataTransfer.dropEffect='move'; if(dragFrom!=null&&dragFrom!==slotIdx) card.classList.add('drag-over'); });
+    card.addEventListener('dragleave',e=>{ if(!card.contains(e.relatedTarget)) card.classList.remove('drag-over'); });
+    card.addEventListener('drop',e=>{ e.preventDefault(); card.classList.remove('drag-over'); const from=dragFrom; if(from==null||from===slotIdx) return; const r=reorder[activePage]; [r[from],r[slotIdx]]=[r[slotIdx],r[from]]; try{MEM.tick();}catch(_){} buildEditor(); regenerate().then(renderPreview); });
     const nrow=document.createElement('div'); nrow.className='nrow';
-    const name=mkNameField(val(activePage,idx,'name',it.name),'DRINK NAME',v=>{ edits[K(activePage,idx,'name')]=v; validate(); schedulePreview(); });
+    // Drag handle — sits at the left edge of the name row
+    const handle=document.createElement('div'); handle.className='drag-handle'; handle.title='Drag to reorder'; handle.textContent='⠿';
+    handle.addEventListener('mouseenter', () => { if (dragFrom == null) card.draggable = true; });
+    handle.addEventListener('mouseleave', () => { if (dragFrom == null) card.draggable = false; });
+    handle.addEventListener('touchstart', () => { card.draggable = true; }, {passive:true});
+    nrow.appendChild(handle);
+    const name=mkNameField(val(activePage,origIdx,'name',it.name),'DRINK NAME',v=>{ edits[K(activePage,origIdx,'name')]=v; validate(); schedulePreview(); });
     nrow.appendChild(name);
     const pw=document.createElement('div'); pw.className='price-wrap'; pw.innerHTML='<span class="cur">₹</span>';
-    const price=document.createElement('input'); price.className='price'; price.value=val(activePage,idx,'price',it.price); price.inputMode='numeric';
-    price.oninput=()=>{ const c=price.value.replace(/[^0-9]/g,''); if(price.value!==c)price.value=c; edits[K(activePage,idx,'price')]=c; schedulePreview(); };
+    const price=document.createElement('input'); price.className='price'; price.value=val(activePage,origIdx,'price',it.price); price.inputMode='numeric';
+    price.oninput=()=>{ const c=price.value.replace(/[^0-9]/g,''); if(price.value!==c)price.value=c; edits[K(activePage,origIdx,'price')]=c; schedulePreview(); };
     pw.appendChild(price); nrow.appendChild(pw);
-    if(it.vol_span) nrow.appendChild(mkVolField(val(activePage,idx,'vol',it.vol),
-      c=>{ edits[K(activePage,idx,'vol')]=c; validate(); schedulePreview(); }));
+    if(it.vol_span) nrow.appendChild(mkVolField(val(activePage,origIdx,'vol',it.vol),
+      c=>{ edits[K(activePage,origIdx,'vol')]=c; validate(); schedulePreview(); }));
     const rm=document.createElement('button'); rm.className='rm'; rm.type='button'; rm.title='Remove drink'; rm.textContent='✕';
-    rm.onclick=()=>{ removed.add(K0(activePage,idx)); buildEditor(); regenerate().then(renderPreview); };
+    rm.onclick=()=>{ removed.add(K0(activePage,origIdx)); buildEditor(); regenerate().then(renderPreview); };
     nrow.appendChild(rm); card.appendChild(nrow);
-    if(it.desc_spans && it.desc_spans.length){
-      card.appendChild(mkDescField(val(activePage,idx,'desc',it.desc),'description',
-        v=>{ edits[K(activePage,idx,'desc')]=v; validate(); schedulePreview(); }));
+    if(it.desc_spans&&it.desc_spans.length){
+      card.appendChild(mkDescField(val(activePage,origIdx,'desc',it.desc),'description',
+        v=>{ edits[K(activePage,origIdx,'desc')]=v; validate(); schedulePreview(); }));
       const ctr=document.createElement('div'); ctr.className='ctr'; ctr.style.marginTop='5px';
-      card.appendChild(ctr); descCtrs.push({idx:idx, it:it, el:ctr});
+      card.appendChild(ctr); descCtrs.push({idx:origIdx, it:it, el:ctr});
     }
     card.appendChild(markerChips(
-      ()=>drinkMarkerSet(activePage,idx,it),
-      (s)=>{ markerEdits[K0(activePage,idx)]=[...s]; try{MEM.tick();}catch(_){} }
+      ()=>drinkMarkerSet(activePage,origIdx,it),
+      (s)=>{ markerEdits[K0(activePage,origIdx)]=[...s]; try{MEM.tick();}catch(_){} }
     ));
     card.appendChild(flagChips(
-      (t)=> t==='badge'? drinkBadge(activePage,idx,it) : drinkSpecials(activePage,idx,it),
-      (t,v)=>{ (t==='badge'?badgeEdits:specialsEdits)[K0(activePage,idx)]=v; try{MEM.tick();}catch(_){} },
-      (t)=> t!=='specials' || !!it.photo_tile      // no photo -> nowhere to put the bar
+      (t)=> t==='badge'? drinkBadge(activePage,origIdx,it) : drinkSpecials(activePage,origIdx,it),
+      (t,v)=>{ (t==='badge'?badgeEdits:specialsEdits)[K0(activePage,origIdx)]=v; try{MEM.tick();}catch(_){} },
+      (t)=> t!=='specials'||!!it.photo_tile
     ));
-    card.appendChild(photoUploadBtn(K0(activePage,idx)));
-    { const _a=photoAdjustUI(K0(activePage,idx)); if(_a) card.appendChild(_a); }
+    card.appendChild(photoUploadBtn(K0(activePage,origIdx)));
+    { const _a=photoAdjustUI(K0(activePage,origIdx)); if(_a) card.appendChild(_a); }
     ed.appendChild(card);
   });
   // --- added (new) drinks + the Add button ---
@@ -1341,9 +1384,9 @@ let memBaseVer='';
 function photoManifest(){ const o={}; for(const k in photoUploads){ const u=photoUploads[k]; if(u&&u.bytes) o[k]={zoom:u.zoom,dx:u.dx,dy:u.dy,rot:u.rot}; } return o; }
 // crop manifest (no bytes) is in the snapshot so a PHOTO-ONLY change is detected as unsaved (triggers
 // the autosave/resume banner); the actual image bytes live in IndexedDB and are reloaded on resume.
-function memSnapshot(){ return { edits:{...edits}, removed:[...removed], added:JSON.parse(JSON.stringify(added)), markerEdits:JSON.parse(JSON.stringify(markerEdits)), badgeEdits:{...badgeEdits}, specialsEdits:{...specialsEdits}, photos:photoManifest() }; }
+function memSnapshot(){ return { edits:{...edits}, removed:[...removed], added:JSON.parse(JSON.stringify(added)), markerEdits:JSON.parse(JSON.stringify(markerEdits)), badgeEdits:{...badgeEdits}, specialsEdits:{...specialsEdits}, reorder:JSON.parse(JSON.stringify(reorder)), photos:photoManifest() }; }
 // defaulting the two flag maps to {} is what lets a PRE-feature snapshot clear stale toggles
-function memApply(st){ edits=(st&&st.edits)?{...st.edits}:{}; removed=new Set((st&&st.removed)||[]); added=(st&&st.added)?JSON.parse(JSON.stringify(st.added)):{}; markerEdits=(st&&st.markerEdits)?JSON.parse(JSON.stringify(st.markerEdits)):{}; badgeEdits=(st&&st.badgeEdits)?{...st.badgeEdits}:{}; specialsEdits=(st&&st.specialsEdits)?{...st.specialsEdits}:{}; }
+function memApply(st){ edits=(st&&st.edits)?{...st.edits}:{}; removed=new Set((st&&st.removed)||[]); added=(st&&st.added)?JSON.parse(JSON.stringify(st.added)):{}; markerEdits=(st&&st.markerEdits)?JSON.parse(JSON.stringify(st.markerEdits)):{}; badgeEdits=(st&&st.badgeEdits)?{...st.badgeEdits}:{}; specialsEdits=(st&&st.specialsEdits)?{...st.specialsEdits}:{}; reorder=(st&&st.reorder)?JSON.parse(JSON.stringify(st.reorder)):{}; }
 let _restoreSlot='auto';
 async function memRebuild(){ photoUploads={}; try{ await loadPhotosFrom(_restoreSlot||'auto'); }catch(_){} _restoreSlot='auto'; buildEditor(); await regenerate(); renderPreview(); }
 // ============ EDIT MEMORY — autosave + resume + version history (per brand) ============
