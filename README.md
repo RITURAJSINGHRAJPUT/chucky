@@ -17,3 +17,18 @@ were solved — read the relevant one before touching that area.
 
 Note: these files carry a little frontmatter and `[[wiki-links]]` from the notes system they came
 from; the links just point to the sibling file of the same name.
+
+---
+
+## Secret Menu & Hub Passphrase
+
+Both the **Secret Menu Back Door** and the **Chucky editor picker** are gated by a client-side passphrase check.
+
+* **Passphrase:** `chucky`
+* **SHA-256 Hash:** `f76660f75ff19a500e061678a57a50c9ad0bba521cb5a2b7d91733c6dbb55855`
+* **Session Key:** `galley_auth` (stored in `sessionStorage` with value `'1'` once unlocked)
+
+### Gated Files
+* **Secret Menu Back Door:** [deploy/public/menu/index.html](file:///Users/rituraj/Downloads/KG/chucky/deploy/public/menu/index.html#L105-L117)
+* **Chucky Editor Hub:** [deploy/public/chucky/index.html](file:///Users/rituraj/Downloads/KG/chucky/deploy/public/chucky/index.html#L156-L167)
+
