@@ -521,13 +521,14 @@ function nameCapacity(it, PT){
   return B + Math.max(0, Math.floor(free/lineH));
 }
 // where the marker cluster starts for an EDITED name (after its true last line)
-function editedNameAnchor(it, nl2, PT){
+function editedNameAnchor(it, nl2, PT, y0){
   const g=nameGeomOf(it,PT), B=it.name_spans.length;
   const M=Math.min(nl2.length, Math.max(B, nameCapacity(it,PT)));   // grown names count too
   const lh=Math.abs(g.lead)*g.size, lastLen=(nl2[M-1]||'').length;
   // a grown name is raised by (M-B)*lh and drawn downward, so its LAST line lands back on the baked
   // baseline — markers and the badge therefore keep their original y.
-  const baseY=g.topY-(Math.min(M,B)-1)*lh, bakedBaseY=g.topY-(B-1)*lh;
+  const _top=(y0!=null?y0:g.topY);
+  const baseY=_top-(Math.min(M,B)-1)*lh, bakedBaseY=g.topY-(B-1)*lh;
   const raise=(it.mk_anchor?it.mk_anchor[1]:bakedBaseY+5.9)-bakedBaseY;
   return [ g.x0 + lastLen*0.63*g.size + 2.4, baseY+raise ];
 }
@@ -538,19 +539,19 @@ function editedNameAnchor(it, nl2, PT){
    deletes+restamps on EITHER a name edit or a marker edit.
    x/y are measured off the name (via editedNameAnchor / mk_anchor), not off mk_anchor's y alone:
    marker_data.py synthesises `last_y+5.9` for markerless drinks, which is a guess.            */
-function badgePlace(it, mp, idx, set, PT){
+function badgePlace(it, mp, idx, set, PT, y0){
   const C=FM.mk_const, P=FM.micons&&FM.micons.newbadge; if(!P) return null;
   const W=iconW(P);
   const nameEd=(K(mp,idx,'name') in edits);
   const nl2=nameEd? nameLines(edits[K(mp,idx,'name')]) : null;
-  const a=nameEd? editedNameAnchor(it,nl2,PT) : (it.mk_anchor||[9.15, it.top_y]);
+  const a=nameEd? editedNameAnchor(it,nl2,PT,y0) : (it.mk_anchor||[9.15, it.top_y]);
   let x=a[0] + markerRunW(set) + (C.gap_badge!=null?C.gap_badge:3.23);
   // never let a long name push the badge under the photo column
   const rail=((it.photo_tile? it.photo_tile[0] : 181) - W - 1);
   const clamped=(x>rail); if(clamped) x=rail;
   const g=nameGeomOf(it,PT), B=it.name_spans.length;
   const M=nl2? Math.min(nl2.length,B) : B;
-  const baseY=g.topY-(M-1)*Math.abs(g.lead)*g.size;
+  const baseY=(y0!=null?y0:g.topY)-(M-1)*Math.abs(g.lead)*g.size;
   return {x:x, y:baseY+(C.dy_badge!=null?C.dy_badge:8.54), clamped:clamped};
 }
 // iconStamp places part 0's ORIGIN; the art extends leftwards, so add iconW to land its LEFT edge at bx.
@@ -611,6 +612,36 @@ function descCapacity(it){
   const free=(it.pitch!=null&&it.content_h!=null)? it.pitch-it.content_h : 0;
   return B + Math.max(0, Math.floor((free-2)/lineH));      // 2pt safety margin
 }
+/* ---- ROW LAYOUT: the single owner of vertical placement -------------------------------------
+   Measured from the artwork: every row holds exactly THREE text lines (name lines + description
+   lines) and is BOTTOM-ANCHORED, with the price sitting level with the last line —
+     LEMON ICED TEA  2 name + 1 desc,  RED BULL  3 name + 0 desc,  everything else  1 name + 2 desc.
+   So the row is laid out from the bottom UP, starting from the baked last description line, which
+   is the one thing that never moves (it is where the price already is). A shorter description
+   therefore pulls the heading DOWN to meet the price rather than stranding it; a longer one, or a
+   wrapped name, pushes the heading UP into the row's free space.
+   Everything vertical goes through here — do not re-add per-feature y offsets alongside it. */
+function descTmOf(it, PT){
+  if(it._dtm!==undefined) return it._dtm;
+  if(!it.desc_spans||!it.desc_spans.length) return it._dtm=null;
+  const s0=it.desc_spans[0][0], bt=PT.lastIndexOf('BT',s0), seg=PT.slice(bt,s0);
+  const re=/([\d.]+) 0 0 ([\d.]+) (-?[\d.]+) (-?[\d.]+) Tm/g; let m=null,last=null;
+  while((last=re.exec(seg))) m=last;
+  return it._dtm = m? {s:bt+m.index, e:bt+m.index+m[0].length, txt:m[0], y:parseFloat(m[4])} : null;
+}
+// nN / nD = the line counts we are about to RENDER. Returns the baselines to draw at.
+function rowLayout(it, PT, nN, nD){
+  const B=(it.name_spans||[]).length, D=(it.desc_spans||[]).length;
+  const ng=nameGeomOf(it,PT), dg=it.desc_geom;
+  const nlh=Math.abs(ng.lead)*ng.size;
+  if(!D||!dg) return {nameY0:ng.topY+(Math.max(1,nN)-1)*nlh, descY0:null, nlh:nlh, dlh:0};
+  const dlh=Math.abs(dg.lead)*dg.size;
+  const descLastY=dg.y0-(D-1)*dlh;                 // pinned: the price's own baseline
+  const gap=(ng.topY-(B-1)*nlh)-dg.y0;             // baked name-to-description gap, per row
+  const descY0 = nD? descLastY+(nD-1)*dlh : null;
+  const nameLastY = nD? descY0+gap : descLastY;    // no description -> the name takes the last line
+  return {nameY0:nameLastY+(Math.max(1,nN)-1)*nlh, descY0:descY0, nlh:nlh, dlh:dlh};
+}
 // rendered lines for an EDITED drink (null if untouched — untouched bytes are never respliced)
 function descRender(mp, idx, it){
   const B=(it.desc_spans||[]).length;
@@ -624,30 +655,9 @@ function descRender(mp, idx, it){
   return {lines:L, joined:joined, wide:L.some(l=>l.length>DESC_MC), cap:cap, baked:B};
 }
 // where the volume sits given the rendered description lines
-/* The price is baked LEVEL WITH THE LAST description line — measured across page 1, the offset is
-   within ±0.17pt on every row. So when a description shrinks (BASIL SMASH going from its baked two
-   lines to one) the text ends 8.4pt higher but the price stays put, and the row reads as having an
-   extra line at the bottom. The volume already follows via volPlace(); the price never did.
-   priceGeomOf locates the price block's own Tm — it sits just before price_span, outside it, so the
-   baseline can be moved without touching the glyphs. */
-function priceGeomOf(it, PT){
-  if(it._pg!==undefined) return it._pg;
-  if(!it.price_span) return it._pg=null;
-  const s0=it.price_span[0], bt=PT.lastIndexOf('BT',s0), seg=PT.slice(bt,s0);
-  const re=/([\d.]+) 0 0 ([\d.]+) (-?[\d.]+) (-?[\d.]+) Tm/g; let m=null,last=null;
-  while((last=re.exec(seg))) m=last;                 // the LAST Tm before the span is the price's
-  return it._pg = m? {s:bt+m.index, e:bt+m.index+m[0].length, txt:m[0], y:parseFloat(m[4])} : null;
-}
-// How far the price must move to stay level with the last RENDERED description line. Expressed as a
-// delta off the baked y rather than recomputed from scratch, so the artwork's own ±0.17pt
-// price-to-text relationship is preserved instead of being flattened to zero.
-function priceShift(it, lines){
-  const g=it.desc_geom, B=(it.desc_spans||[]).length;
-  if(!g||!B||!lines) return 0;
-  const n=Math.max(1, lines.length);
-  return (B-n)*Math.abs(g.lead)*g.size;
-}
-function volPlace(it, lines){
+// y0 overrides the baked description origin — rowLayout moves the whole block, and the volume
+// rides its LAST line, so it has to be measured from where the block actually lands.
+function volPlace(it, lines, y0){
   const g=it.desc_geom;
   if(!g||!lines||!lines.length) return {x:it.vol_pos.x, y:it.vol_pos.y};
   const li=lines.length-1;
@@ -657,7 +667,7 @@ function volPlace(it, lines){
   // measures one space wide, so taking the larger of the two is right in both cases.
   const gap=Math.max(it.vol_gap||0, descAdvance(g,' '));
   return { x: g.x0+(g.dx||0)+descAdvance(g,lines[li])+gap,
-           y: g.y0+g.lead*g.size*li };
+           y: (y0!=null?y0:g.y0)+g.lead*g.size*li };
 }
 // fallback for volumes whose digits are missing from the subset font (1, 7 and 9 are absent),
 // mirroring priceStamp. Re-states the fill colour: the stamp lands at the end of the stream,
@@ -767,12 +777,48 @@ async function regenerate(){
       (it.extra_spans||[]).forEach(sp=>delSpans.push(sp));
       if(it.top_y!=null) removedTops.push({y:it.top_y, pitch:(it.pitch||rowH)});
     });
+    const volSkip=[];
+    // Vertical layout for every touched row, decided BEFORE reflowOps runs so the Tm ranges we are
+    // about to rewrite can be excluded from it (two ops over one range corrupt spliceBytes). The
+    // row shift `sh` is applied by hand below, the same pattern volumes use.
+    const layout=new Map();
+    pageData.items.forEach((it,idx)=>{
+      const origIdx=getOrigIdx(idx); const isReordered=origIdx!==idx;
+      if(removed.has(K0(mp,origIdx))||!it.name_spans||!it.name_spans.length) return;
+      const origIt=pageData.items[origIdx];
+      const nameEd=isReordered||(K(mp,origIdx,'name') in edits);
+      const dr=descRender(mp,origIdx,origIt);
+      if(!nameEd && !dr) return;                       // untouched rows are never respliced
+      const B=it.name_spans.length, ng=nameGeomOf(it,PT);
+      const typed=nameEd? nameLines(val(mp,origIdx,'name',origIt.name)) : null;
+      const nN=typed? Math.min(typed.length, Math.max(B, nameCapacity(it,PT))) : B;
+      const nD=dr? dr.lines.filter(l=>l&&l.trim()).length : (it.desc_spans||[]).length;
+      let L=rowLayout(it,PT,nN,nD);
+      // nameCapacity and descCapacity each measure the row's free space independently, so a grown
+      // name AND a grown description can together rise past the row above. Merge name lines back
+      // until the block fits rather than letting it collide.
+      const free=(it.pitch!=null&&it.content_h!=null)? it.pitch-it.content_h : 0;
+      let clamped=false;
+      while(nN>1 && (L.nameY0-ng.topY)>free+0.5){ nN--; clamped=true; L=rowLayout(it,PT,nN,nD); }
+      const dtm=descTmOf(it,PT);
+      // only rewrite a Tm that actually moves — the baked price-to-text relationship carries up to
+      // 0.4pt of hand jitter, and an unedited row must stay byte-identical
+      const moveN = ng.tm && Math.abs(L.nameY0-ng.tm.y)>0.5;
+      const moveD = dtm && L.descY0!=null && Math.abs(L.descY0-dtm.y)>0.5;
+      if(!moveN && !moveD && nN<=B) return;
+      layout.set(idx,{L:L,nN:nN,nD:nD,B:B,typed:typed,ng:ng,dtm:dtm,moveN:moveN,moveD:moveD,clamped:clamped});
+      if(moveN) volSkip.push([ng.tm.s,ng.tm.e]);
+      if(moveD) volSkip.push([dtm.s,dtm.e]);
+    });
     // marker-edited survivors: delete their baked J + baked dairy so we can restamp the chosen set.
     // Added to delSpans BEFORE reflow so reflowOps won't try to shift the (deleted) baked marks.
     pageData.items.forEach((it,idx)=>{
       const origIdx=getOrigIdx(idx); const isReordered=origIdx!==idx;
       if(removed.has(K0(mp,origIdx))) return;
-      const touched=(K0(mp,origIdx) in markerEdits)||(K(mp,origIdx,'name') in edits)||isReordered;
+      // ...and whenever rowLayout moves the name block: a desc-only edit can pull the heading
+      // down, and a baked marker left at the old baseline would float above it
+      const _lm=layout.get(idx);
+      const touched=(K0(mp,origIdx) in markerEdits)||(K(mp,origIdx,'name') in edits)||isReordered||!!(_lm&&_lm.moveN);
       if(!touched) return;
       if(it.marker_span) delSpans.push(it.marker_span);
       if(it.dairy_span) delSpans.push(it.dairy_span);
@@ -787,7 +833,8 @@ async function regenerate(){
       const origIdx=getOrigIdx(idx); const origIt=pageData.items[origIdx]; const isReordered=origIdx!==idx;
       if(removed.has(K0(mp,origIdx))) return;
       const _nm=(K(mp,origIdx,'name') in edits)||isReordered, _mk=(K0(mp,origIdx) in markerEdits)||isReordered;
-      if(it.badge_span&&(!drinkBadge(mp,origIdx,origIt)||_nm||_mk)) delSpans.push(it.badge_span);
+      const _bmv=!!(layout.get(idx)&&layout.get(idx).moveN);   // heading moved -> badge must follow
+      if(it.badge_span&&(!drinkBadge(mp,origIdx,origIt)||_nm||_mk||_bmv)) delSpans.push(it.badge_span);
       // an uploaded photo is appended over photo_tile and would BURY a baked bar, so restamp it
       if(it.specials_span&&(!drinkSpecials(mp,origIdx,origIt)||photoUploads[K0(mp,origIdx)])){
         delSpans.push(it.specials_span);
@@ -804,7 +851,6 @@ async function regenerate(){
     // Volumes we re-place ourselves must be hidden from reflowOps: it rewrites every Tm it sees,
     // and two ops covering one byte range would corrupt the stream in spliceBytes. We apply the
     // reflow shift to them by hand instead (see the volume block below).
-    const volSkip=[];
     pageData.items.forEach((it,idx)=>{
       const origIdx=getOrigIdx(idx); const isReordered=origIdx!==idx;
       if(removed.has(K0(mp,origIdx))||!it.vol_span) return;
@@ -813,29 +859,6 @@ async function regenerate(){
     // A name that needs more lines than the artwork baked is re-anchored by rewriting its block's
     // Tm (see the name splice below). That Tm must ALSO be hidden from reflowOps for the same
     // reason volumes are — decided here, before reflowOps runs, and the row shift is applied by hand.
-    const nameGrow=new Map();
-    pageData.items.forEach((it,idx)=>{
-      const origIdx=getOrigIdx(idx); const isReordered=origIdx!==idx;
-      if(removed.has(K0(mp,origIdx))||!it.name_spans||!it.name_spans.length) return;
-      if(!isReordered && !(K(mp,origIdx,'name') in edits)) return;
-      const B=it.name_spans.length, g=nameGeomOf(it,PT);
-      const typed=nameLines(val(mp,origIdx,'name',pageData.items[origIdx].name));
-      const n=Math.min(typed.length, Math.max(B, nameCapacity(it,PT)));
-      if(n>B && g.tm){ nameGrow.set(idx,{n:n,g:g,B:B,typed:typed}); volSkip.push([g.tm.s,g.tm.e]); }
-    });
-    // Same treatment for the price when the description's line count changes: its Tm is rewritten
-    // below, so reflowOps must not also rewrite it (two ops over one range corrupt spliceBytes).
-    const priceMove=new Map();
-    pageData.items.forEach((it,idx)=>{
-      const origIdx=getOrigIdx(idx);
-      if(removed.has(K0(mp,origIdx))||!it.price_span||!it.price_pos) return;
-      const dr=descRender(mp,origIdx,pageData.items[origIdx]);
-      if(!dr) return;
-      const shift=priceShift(it, dr.lines);
-      if(!shift) return;
-      const pg=priceGeomOf(it,PT);
-      if(pg){ priceMove.set(idx, {pg:pg, shift:shift}); volSkip.push([pg.s,pg.e]); }
-    });
     // 2) reflow survivors below removed drinks (shift by real heights)
     if(removedTops.length) ops=ops.concat(reflowOps(ps.pristine, removedTops, delSpans.concat(volSkip), rowH));
     const shiftOf=y=> removedTops.filter(t=>t.y>((y||0)+0.5)).reduce((a,t)=>a+t.pitch,0);
@@ -846,27 +869,28 @@ async function regenerate(){
       const sh=shiftOf(it.top_y);
       // name: always splice when reordered; use origIt's content as baked fallback
       if((isReordered||K(mp,origIdx,'name') in edits)&&it.name_spans.length){
-        const grow=nameGrow.get(idx);
-        if(grow){
-          // GROW UPWARD: raise the block's Tm by (n-B) line-heights and draw downward, so the LAST
-          // line lands back on the baked baseline. The description's baked Tm, the markers and the
-          // NEW badge then all stay exactly where they were. Growing DOWNWARD is not an option —
-          // the description sits only ~10pt below the name and a -15.5pt line would overlap it.
-          const {n,g,B,typed}=grow, lh=Math.abs(g.lead)*g.size;
-          const L=typed.slice(0,n-1).concat([typed.slice(n-1).join(' ')]);
-          const ny=g.tm.y+(n-B)*lh+sh;      // sh by hand: reflowOps was told to skip this Tm
-          ops.push({s:g.tm.s, e:g.tm.e, rep:enc(g.tm.txt.replace(/(-?[\d.]+) Tm$/, num(ny)+' Tm'))});
+        const lay=layout.get(idx);
+        if(lay && lay.typed && lay.nN>lay.B){
+          // more typed lines than the artwork baked: draw them all, the surplus riding inside the
+          // LAST baked span with the artwork's own leading (the technique the description uses)
+          const {nN,B,typed,ng}=lay;
+          const L=typed.slice(0,nN-1).concat([typed.slice(nN-1).join(' ')]);
           it.name_spans.forEach((sp,i)=>{
             let rep='('+escPdf(L[i]||'')+')Tj';
-            // surplus lines ride inside the LAST baked span, stepping down with the artwork's own
-            // leading — the same technique the description path uses
-            if(i===B-1) for(let j=B;j<L.length;j++) rep+='\n0 '+num(g.lead)+' Td\n('+escPdf(L[j])+')Tj';
+            if(i===B-1) for(let j=B;j<L.length;j++) rep+='\n0 '+num(ng.lead)+' Td\n('+escPdf(L[j])+')Tj';
             ops.push({s:sp[0],e:sp[1],rep:enc(rep)});
           });
         } else {
           const nl=nameToSpans(nameLines(val(mp,origIdx,'name',origIt.name)), it.name_spans.length);
           it.name_spans.forEach((sp,i)=>ops.push({s:sp[0],e:sp[1],rep:enc('('+escPdf(nl[i]||'')+')Tj')}));
         }
+      }
+      // re-anchor the row's blocks to the bottom-up layout (sh by hand: reflowOps skips these Tms)
+      { const lay=layout.get(idx);
+        if(lay&&lay.moveN) ops.push({s:lay.ng.tm.s,e:lay.ng.tm.e,
+          rep:enc(lay.ng.tm.txt.replace(/(-?[\d.]+) Tm$/, num(lay.L.nameY0+sh)+' Tm'))});
+        if(lay&&lay.moveD) ops.push({s:lay.dtm.s,e:lay.dtm.e,
+          rep:enc(lay.dtm.txt.replace(/(-?[\d.]+) Tm$/, num(lay.L.descY0+sh)+' Tm'))});
       }
       // description: for a reordered slot with no edit, write origIt's baked desc into this slot's spans
       let _dr=K(mp,origIdx,'desc') in edits ? descRender(mp,origIdx,origIt) : null;
@@ -891,7 +915,19 @@ async function regenerate(){
       if(it.vol_span&&it.vol_pos&&(isReordered||(K(mp,origIdx,'vol') in edits)||_dr)){
         const vv=val(mp,origIdx,'vol',origIt.vol)||'';
         const vtxt=vv?(origIt.vol_pre||'')+vv+(origIt.vol_suf||''):'';
-        const vp=_dr?volPlace(it,_dr.lines):{x:it.vol_pos.x,y:it.vol_pos.y};
+        const _lay=layout.get(idx);
+        let vp;
+        if(_lay && _lay.nD===0){
+          // description emptied: the volume has no line to ride, so it sits straight after the
+          // NAME's last line — the way RED BULL/GINGER ALE/PERRIER[300ML] is drawn natively
+          const _ng2=nameGeomOf(it,PT);
+          const _nl=(_lay.typed||nameLines(origIt.name)).filter(Boolean);
+          const _lastTxt=_nl[Math.min(_lay.nN,_nl.length)-1]||'';
+          vp={ x:_ng2.x0 + _lastTxt.length*0.63*_ng2.size + 1.2,
+               y:_lay.L.nameY0-(Math.max(1,_lay.nN)-1)*Math.abs(_ng2.lead)*_ng2.size };
+        } else {
+          vp=_dr?volPlace(it,_dr.lines,_lay&&_lay.L.descY0!=null?_lay.L.descY0:null):{x:it.vol_pos.x,y:it.vol_pos.y};
+        }
         const va=(FM.allowed&&FM.allowed.desc)||'';
         const vfits=!!vtxt&&[...vtxt].every(c=>va.indexOf(c)>=0);
         if(vfits) ops.push({s:it.vol_span[0],e:it.vol_span[1],rep:enc('5 0 0 5 '+num(vp.x)+' '+num(vp.y+sh)+' Tm\n('+escPdf(vtxt)+')Tj')});
@@ -901,14 +937,10 @@ async function regenerate(){
       if(it.price_span){ const pv=val(mp,origIdx,'price',origIt.price);
         const pa=(FM.allowed&&FM.allowed.price)||'0235';
         const fits=[...(pv||'')].every(c=>pa.indexOf(c)>=0);
-        // keep the price level with the description's last rendered line — up when it shrinks,
-        // down when it grows past the baked spans. sh by hand: reflowOps skips this Tm.
-        const _pm=priceMove.get(idx);
-        if(_pm) ops.push({s:_pm.pg.s, e:_pm.pg.e,
-          rep:enc(_pm.pg.txt.replace(/(-?[\d.]+) Tm$/, num(_pm.pg.y+_pm.shift+sh)+' Tm'))});
-        const _py=it.price_pos? it.price_pos.y+(_pm?_pm.shift:0) : 0;
+        // The price NEVER moves: rowLayout pins the description's last line to the baked
+        // baseline the price already sits on, so the text comes to the price instead.
         if(fits){ if(isReordered||K(mp,origIdx,'price') in edits) ops.push({s:it.price_span[0],e:it.price_span[1],rep:enc('('+escPdf(pv)+')Tj')}); }
-        else { ops.push({s:it.price_span[0],e:it.price_span[1],rep:enc('()Tj')}); if(it.price_pos&&pv) append+=priceStamp({x:it.price_pos.x,y:_py+sh,size:it.price_pos.size},pv); }
+        else { ops.push({s:it.price_span[0],e:it.price_span[1],rep:enc('()Tj')}); if(it.price_pos&&pv) append+=priceStamp({x:it.price_pos.x,y:it.price_pos.y+sh,size:it.price_pos.size},pv); }
       }
       // uploaded photo -> draw over the drink's (shifted) tile; keyed by origIdx (photo belongs to the drink)
       const up=photoUploads[K0(mp,origIdx)];
@@ -916,9 +948,11 @@ async function regenerate(){
       // markers ALWAYS sit under the whole title: restamp when name OR marker set changed, or reordered
       const _nameEd=(K(mp,origIdx,'name') in edits)||isReordered;
       const _mkEd=(K0(mp,origIdx) in markerEdits)||isReordered;
-      if((_nameEd||_mkEd)&&it.mk_anchor){
+      const _mvN=!!(layout.get(idx)&&layout.get(idx).moveN);   // rowLayout pulled the heading
+      if((_nameEd||_mkEd||_mvN)&&it.mk_anchor){
         const set=(K0(mp,origIdx) in markerEdits)?new Set(markerEdits[K0(mp,origIdx)]):drinkMarkerSet(mp,origIdx,origIt);
-        const a=_nameEd?editedNameAnchor(it,nameLines(val(mp,origIdx,'name',origIt.name)),PT):it.mk_anchor;
+        const _lg=layout.get(idx), _ly=_lg?_lg.L.nameY0:null;
+        const a=_nameEd?editedNameAnchor(it,nameLines(val(mp,origIdx,'name',origIt.name)),PT,_ly):(_ly!=null?[it.mk_anchor[0],it.mk_anchor[1]+(_ly-nameGeomOf(it,PT).topY)]:it.mk_anchor);
         append+=stampMarkers(a[0],a[1]+sh,set);
       }
       // ---- SPECIALS bar. Emitted AFTER photoDrawOp above so an upload can't bury it. ----
@@ -927,11 +961,11 @@ async function regenerate(){
         if(_sp) append+=specialsStamp(_sp,sh,pageData.bold_font||'T1_0');
       }
       // ---- NEW badge. Restamped whenever the name or markers moved (it packs after the cluster). ----
-      if(drinkBadge(mp,origIdx,origIt)&&(!it.badge_span||_nameEd||_mkEd)){
+      if(drinkBadge(mp,origIdx,origIt)&&(!it.badge_span||_nameEd||_mkEd||_mvN)){
         const _bs=(K0(mp,origIdx) in markerEdits)?new Set(markerEdits[K0(mp,origIdx)]):drinkMarkerSet(mp,origIdx,origIt);
         // an untouched drink that merely had its badge switched back on lands on the baked position
-        if(it.badge_pos&&!_nameEd&&!_mkEd) append+=badgeStamp(it.badge_pos[0],it.badge_pos[1]+sh);
-        else { const _bp=badgePlace(it,mp,origIdx,_bs,PT); if(_bp) append+=badgeStamp(_bp.x,_bp.y+sh); }
+        if(it.badge_pos&&!_nameEd&&!_mkEd&&!_mvN) append+=badgeStamp(it.badge_pos[0],it.badge_pos[1]+sh);
+        else { const _bl=layout.get(idx); const _bp=badgePlace(it,mp,origIdx,_bs,PT,_bl?_bl.L.nameY0:null); if(_bp) append+=badgeStamp(_bp.x,_bp.y+sh); }
       }
     });
     // 4) added drinks -> stack into the space freed below the LAST survivor's real content.
@@ -1359,19 +1393,21 @@ function validate(){
       const p=volPlace(c.it,r.lines);
       const vv=val(activePage,c.idx,'vol',c.it.vol)||'';
       const w=((c.it.vol_pre||'')+vv+(c.it.vol_suf||'')).length*DESC_ADV*(c.it.vol_pos.size||5);
-      // the price now tracks the description's last line too, so compare against its MOVED y —
-      // a shrunk description puts the volume and the price on the SAME line, which is exactly
-      // when they can collide
-      const _pY=c.it.price_pos.y+priceShift(c.it,r.lines);
-      if(Math.abs(p.y-_pY)<2 && p.x+w>c.it.price_pos.x-2){ over=true; msg+=' — volume hits the price'; }
+      // a shortened description is pulled DOWN onto the price's own line, which is exactly when
+      // the volume (which rides the last description line) can run into it
+      if(Math.abs(p.y-c.it.price_pos.y)<2 && p.x+w>c.it.price_pos.x-2){ over=true; msg+=' — volume hits the price'; }
     }
     // a name can grow upward into the row's free space, but only so far — past nameCapacity the
     // extra lines get merged back onto the last line rather than collide with the row above
     if(pageStreams[activePage] && c.it.name_spans && c.it.name_spans.length){
       const _PTn=new TextDecoder('latin1').decode(pageStreams[activePage].pristine);
       const _typed=nameLines(val(activePage,c.idx,'name',c.it.name)).filter(Boolean).length;
-      const _ncap=Math.max(c.it.name_spans.length, nameCapacity(c.it,_PTn));
-      if(_typed>_ncap){ over=true; msg+=' — name needs '+_typed+' lines, only '+_ncap+' fit'; }
+      const _nD=r? r.lines.filter(l=>l&&l.trim()).length : (c.it.desc_spans||[]).length;
+      const _free=(c.it.pitch!=null&&c.it.content_h!=null)? c.it.pitch-c.it.content_h : 0;
+      const _ng=nameGeomOf(c.it,_PTn);
+      let _fit=Math.max(1,_typed);
+      while(_fit>1 && (rowLayout(c.it,_PTn,_fit,_nD).nameY0-_ng.topY)>_free+0.5) _fit--;
+      if(_typed>_fit){ over=true; msg+=' — name needs '+_typed+' lines, only '+_fit+' fit in this row'; }
     }
     // the NEW badge packs after the name + marker cluster; a long name pushes it to the photo rail
     if(drinkBadge(activePage,c.idx,c.it) && pageStreams[activePage]){
