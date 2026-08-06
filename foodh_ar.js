@@ -13,7 +13,7 @@ global.fetch=(f)=>{f=String(f).split("?")[0];const p=path.join(DIR,f);const buf=
 global.TextEncoder=TextEncoder;global.TextDecoder=TextDecoder;
 const ctx=win;vm.createContext(ctx);["PDFLib","pdfjsLib","fetch","localStorage","sessionStorage","TextEncoder","TextDecoder","console","setTimeout","clearTimeout","matchMedia","devicePixelRatio"].forEach(k=>{ctx[k]=global[k]||win[k];});
 ctx.window=win;ctx.document=win.document;ctx.globalThis=ctx;
-vm.runInContext(engine+";globalThis.__h={get edits(){return edits;},set edits(v){edits=v;},get FM(){return FM;},regenerate,get removed(){return removed;},set removed(v){removed=v;},get added(){return added;},set added(v){added=v;},get persona(){return typeof persona!=='undefined'?persona:null;},set persona(v){ if(typeof persona!=='undefined') persona=v; },fitDesc:(typeof fitDesc!=='undefined'?fitDesc:null),maxLinesAt:(typeof maxLinesAt!=='undefined'?maxLinesAt:null),setMarkers:(id,arr)=>{ if(typeof markerEdits!=='undefined') markerEdits[id]=arr; else if(typeof allerEdits!=='undefined') allerEdits[id]=arr; },ready:()=>!!(typeof FM!=='undefined'&&FM&&pageStreams.length)};",ctx);
+vm.runInContext(engine+";globalThis.__h={get order(){return typeof order!=='undefined'?order:{};},set order(v){ if(typeof order!=='undefined') order=v; },get edits(){return edits;},set edits(v){edits=v;},get FM(){return FM;},regenerate,get removed(){return removed;},set removed(v){removed=v;},get added(){return added;},set added(v){added=v;},get persona(){return typeof persona!=='undefined'?persona:null;},set persona(v){ if(typeof persona!=='undefined') persona=v; },fitDesc:(typeof fitDesc!=='undefined'?fitDesc:null),maxLinesAt:(typeof maxLinesAt!=='undefined'?maxLinesAt:null),setMarkers:(id,arr)=>{ if(typeof markerEdits!=='undefined') markerEdits[id]=arr; else if(typeof allerEdits!=='undefined') allerEdits[id]=arr; },ready:()=>!!(typeof FM!=='undefined'&&FM&&pageStreams.length)};",ctx);
 const H=ctx.__h;
 (async()=>{
   for(let i=0;i<500&&!H.ready();i++)await new Promise(r=>setTimeout(r,25));
@@ -21,6 +21,7 @@ const H=ctx.__h;
   const FIELD={}; for(const f of H.FM.fields) FIELD[f.id]=f;
   if(process.env.PERSONA && H.persona){ Object.assign(H.persona, JSON.parse(process.env.PERSONA)); }
   const MK=JSON.parse(process.argv[5]||'{}');
+  if(process.env.ORDER){ H.order=JSON.parse(process.env.ORDER); }
   if(process.env.REMOVED) H.removed=new Set(JSON.parse(process.env.REMOVED));
   if(process.env.ADDED) H.added=JSON.parse(process.env.ADDED);
   for(const id in MK){ H.setMarkers(id, MK[id]); console.log('  markers',id,'->',MK[id].join(',')); }

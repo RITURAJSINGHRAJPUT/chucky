@@ -202,6 +202,11 @@ main.app{display:grid;grid-template-columns:210px 1fr minmax(400px,560px);height
   .brand .tag{display:none}.search{max-width:150px}
 }
 @media(prefers-reduced-motion:reduce){*{animation-duration:.01s!important}}
+.movebtns{display:flex;flex-direction:column;gap:2px;margin-right:8px;flex:none}
+.mvb{width:20px;height:15px;line-height:1;padding:0;border-radius:4px;cursor:pointer;
+  background:transparent;border:1px solid var(--line,rgba(255,255,255,.14));color:var(--muted,#8F8676);font-size:10px}
+.mvb:hover:not(:disabled){border-color:var(--ac,#E0B020);color:var(--ac,#E0B020)}
+.mvb:disabled{opacity:.25;cursor:default}
 </style>
 </head>
 <body>
@@ -243,6 +248,7 @@ const allerEdits = {};   // nameId -> [allergens]  (per-item allergen toggles on
 const originEdits = {};   // nameId -> country|null  (per-item cuisine-origin flag toggles)
 let removed = new Set();
 let added = [];   // [{sec, name, desc, price, allergens:[], _id}]
+let order = {};   // 'page|SECTION' -> [dishId,...] user reordering WITHIN that section
 let addSeq = 0;          // field id -> new text
 let doc, pageStreams=[], pdfBytesOrig;
 let activePage = 0, lastBytes=null, pdfjsDoc=null, renderToken=0;
@@ -518,6 +524,12 @@ function _textRuns(b){
    Measured on aiko p0 — headings 24.1-33.3 above, "8pcs" 29.9 above, legend 49.7 below, while real
    dish content is 0-12 either way plus grams up to 26.8 BELOW. */
 function _ownsRun(ny, ry, slotH){ const d=ny-ry; return d>=-12 && d<=Math.max(slotH,20)-2; }
+/* Allergen/marker artwork (q..Q, positioned by `cm`) always sits slightly ABOVE its own dish's
+   name — never below it. _ownsRun's downward reach is a whole slot, which overlaps the NEXT dish's
+   raised artwork (at ny-slot+5.8) and would let a dish claim its neighbour's icons: reordering
+   BURNT GARLIC RICE dragged MUSHROOM TRUFFLE's icon along with it, and removal had the same latent
+   bug. Artwork therefore gets its own tight window. */
+function _ownsArt(ny, ry){ const d=ny-ry; return d>=-12 && d<=0.5; }
 function _cluster(blocks,cmin,cmax,gap){gap=gap||18;
   const bs=blocks.filter(b=>b.x!==null&&b.x>=cmin&&b.x<=cmax&&b.y!==null).sort((a,b)=>b.y-a.y);
   const cl=[];let cur=[];for(const b of bs){if(!cur.length)cur=[b];else if(cur[cur.length-1].y-b.y<=gap)cur.push(b);else{cl.push(cur);cur=[b];}}
@@ -536,7 +548,8 @@ function pageColumns(p){
 let _structCache={sig:null,byPage:{}};
 function structuralForPage(p, pristine){
   const removedHere=FM.fields.filter(f=>f.page===p&&f.role==='name'&&removed.has(f.id));
-  if(!removedHere.length) return {deletes:[],shiftOps:[],priceShift:{},skip:new Set()};
+  const reorderHere=Object.keys(order).some(k=>k.split('|')[0]==String(p)&&order[k]&&order[k].length);
+  if(!removedHere.length&&!reorderHere) return {deletes:[],shiftOps:[],priceShift:{},skip:new Set()};
   const blocks=_blocks(pristine), anchors=_anchors(pristine), runs=_textRuns(pristine);
   const cols=pageColumns(p);
   const priceTm=FM.fields.filter(f=>f.page===p&&f.role==='price');
@@ -566,8 +579,8 @@ function structuralForPage(p, pristine){
     // self-contained q..Q artwork (allergen icons, photos) still goes whole
     for(const b of blocks){
       if(b.kind!=='q'||b.x===null||b.y===null||b.x<col.min||b.x>col.max) continue;
-      const j=owner(b.y);
-      if(j>=0&&remSet.has(j)) deletes.push(b.span);
+      const j=cidx(b.y);
+      if(_ownsArt(ny[j],b.y)&&remSet.has(j)) deletes.push(b.span);
     }
     for(const j of remSet) removedSlots.push({cmin:col.min,cmax:col.max,y:top(j),h:slotH(j)});
     // SHIFT per ANCHOR, judged on its OWN y — NOT on the block it happens to live in.
@@ -585,16 +598,46 @@ function structuralForPage(p, pristine){
       if(d<=0) continue;
       // if this Tm is a price Tm, defer to price handling (compose with right-align)
       const pf=priceTm.find(pf=>a.s>=pf.tm_span[0]&&a.e<=pf.tm_span[1]);
-      if(pf){ priceShift[pf.id]=d; }
+      if(pf){ priceShift[pf.id]=(priceShift[pf.id]||0)+d; }
       else shiftOps.push({s:a.s,e:a.e,rep:enc(fmtNum(a.y+d))});
     }
   }
-  // mark removed items' field ids to skip in text edits
-  for(const nf of removedHere){
-    skip.add(nf.id);
-    const it=FM.fields.filter(f=>f.page===p);
-    // desc/prices belonging to this name (same column, nearest below/within slot) -- match by item grouping
+  /* ---- REORDER WITHIN A SECTION -------------------------------------------------------------
+     A dish is RELOCATED, never retyped: we shift every run it owns by one delta. That is why this
+     is safe where the drinks editors' drag-drop is not — that one writes a dish's text into another
+     dish's baked skeleton, so content lands in a slot whose line counts don't match. Here the bytes
+     move; nothing is re-rendered.
+     Ownership uses the same _ownsRun rule as deletion, so descriptions, grams, the price and the
+     allergen q..Q artwork all travel with the name, while section headings and page chrome stay. */
+  if(reorderHere){
+    const model=sectionModel(p);
+    for(const label in model){
+      const m=model[label], lay=secLayout(p,label);
+      const dy={};                                   // dishId -> delta
+      for(const id of m.ids){ const d=+( (lay[id]!=null? lay[id] : m.y[id]) - m.y[id] ).toFixed(3); if(d) dy[id]=d; }
+      if(!Object.keys(dy).length) continue;
+      const secs=sectionsForPage(p);
+      for(const id in dy){
+        const d=dy[id], ny=m.y[id], h=m.h[id];
+        const nf=FM.fields.find(f=>f.id===id);
+        if(!nf||removed.has(id)) continue;
+        // text runs reach a slot below the name; artwork sits just ABOVE it and must not be
+        // claimed from the dish below (see _ownsArt)
+        const own=(y,kind)=> kind==='cm'? _ownsArt(ny,y) : _ownsRun(ny,y,h);
+        for(const a of anchors){
+          if(a.x===null||a.y===null) continue;
+          if(!own(a.y,a.kind)) continue;
+          // a price's y and its right-align x are composed in ONE rewrite of tm_span by opsForPage,
+          // so route it there instead of touching the raw operand (they would collide)
+          const pf=priceTm.find(pf=>a.s>=pf.tm_span[0]&&a.e<=pf.tm_span[1]);
+          if(pf){ priceShift[pf.id]=(priceShift[pf.id]||0)+d; continue; }
+          shiftOps.push({s:a.s,e:a.e,rep:enc(fmtNum(a.y+d))});
+        }
+      }
+    }
   }
+  // mark removed items' field ids to skip in text edits
+  for(const nf of removedHere) skip.add(nf.id);
   return {deletes,shiftOps,priceShift,skip,removedSlots};
 }
 
@@ -963,6 +1006,45 @@ function itemsForPage(p){
 }
 function descText(d){ return (d.id in edits)? edits[d.id] : d.display; }
 
+/* ---- SECTION MODEL ---------------------------------------------------------------------------
+   Sections are DERIVED, not stored: a dish belongs to the section whose col_x is within 140pt and
+   whose last_y is at or below it. Reorder has to be gated on this and NOT on pageColumns() — page 1
+   is a single column holding RICE + NOODLES + DESSERTS, so a column-scoped move would silently let
+   a dish cross into another section.
+   Each dish's height is its own pitch to the next dish IN THE SAME SECTION (dishes differ: a 1-line
+   description is ~33pt, a 2-line ~41, DIMSUM PLATTER's 3-line more), with the last dish taking the
+   section's gap_below. Do NOT use structuralForPage's slotH() for this — it is unreliable for the
+   last dish of a section (it reports 94.23 for 1:8, where the real slot is ~33). */
+function sectionOf(it, secs){
+  const ix=it.x, iy=it.y; let best=null, bs=Infinity;
+  for(const s of secs){ const dx=Math.abs(s.col_x-ix); if(dx>140) continue; if(iy<(s.last_y-2)) continue;
+    const sc=(iy-s.last_y)+dx*0.01; if(sc<bs){bs=sc;best=s;} }
+  return best;
+}
+const _secModel={};
+function sectionModel(p){
+  if(_secModel[p]) return _secModel[p];
+  const secs=sectionsForPage(p), {items}=itemsForPage(p), out={};
+  for(const s of secs) out[s.label]={sec:s, ids:[], y:{}, h:{}};
+  for(const it of items){ const s=sectionOf(it,secs); if(!s) continue; out[s.label].ids.push(it.name.id); out[s.label].y[it.name.id]=it.y; }
+  for(const L in out){ const m=out[L]; m.ids.sort((a,b)=>m.y[b]-m.y[a]);      // top -> bottom
+    m.ids.forEach((id,i)=>{ m.h[id]= i<m.ids.length-1? +(m.y[id]-m.y[m.ids[i+1]]).toFixed(2) : (m.sec.gap_below||m.sec.slot||33); });
+  }
+  return _secModel[p]=out;
+}
+// current order of a section (user override, else pristine top-to-bottom)
+function secOrder(p, label){ const m=sectionModel(p)[label]; if(!m) return [];
+  const k=p+'|'+label; return (k in order)? order[k].filter(id=>m.ids.indexOf(id)>=0) : m.ids.slice(); }
+// y each dish should sit at under the CURRENT order: re-stack from the section top using the
+// heights of whatever dish now occupies each position.
+function secLayout(p, label){
+  const m=sectionModel(p)[label]; if(!m) return {};
+  const ord=secOrder(p,label), top=m.y[m.ids[0]], out={};
+  let y=top;
+  for(const id of ord){ out[id]=y; y-=m.h[id]; }
+  return out;
+}
+
 // ----- ADD-ITEM UI -----
 function sectionsForPage(p){ let r=[]; (SECTIONS||[]).forEach((s,i)=>{ if(s.page===p) r.push(Object.assign({_i:i},s)); }); return r; }
 function addedCountInSec(i){ return added.filter(a=>a.sec===i).length; }
@@ -1064,6 +1146,23 @@ function buildEditor(){
     }
     const card=document.createElement('div'); card.className='card';
     const nrow=document.createElement('div'); nrow.className='nrow';
+    // Move up/down WITHIN the section. Buttons rather than drag-and-drop: a dish can never land in
+    // another section by accident, and the ends are simply disabled. (The drinks editors' drag
+    // handler is the cautionary tale — it rewrites text into a foreign slot.)
+    { const _ord=secOrder(activePage,_L), _pos=_ord.indexOf(it.name.id);
+      if(_pos>=0&&_ord.length>1){
+        const mv=document.createElement('div'); mv.className='movebtns';
+        const mk=(lbl,to,dis)=>{ const b=document.createElement('button'); b.type='button'; b.className='mvb';
+          b.textContent=lbl; b.title=lbl==='\u2191'?'Move up':'Move down'; b.disabled=dis;
+          b.addEventListener('click',()=>{ const o=secOrder(activePage,_L);
+            const i=o.indexOf(it.name.id); if(i<0||to<0||to>=o.length) return;
+            o.splice(to,0,o.splice(i,1)[0]); order[activePage+'|'+_L]=o;
+            try{MEM.tick();}catch(_){} buildEditor(); regenerate().then(renderPreview); });
+          return b; };
+        mv.appendChild(mk('\u2191',_pos-1,_pos===0));
+        mv.appendChild(mk('\u2193',_pos+1,_pos===_ord.length-1));
+        nrow.appendChild(mv);
+      } }
     const name=document.createElement('div'); name.className='name'; name.dataset.id=it.name.id; name.dataset.kind='name'; name.dataset.orig=it.name.display; name.contentEditable='true';
     name.textContent = (it.name.id in edits)? edits[it.name.id] : it.name.display;
     nrow.appendChild(name);
@@ -1325,8 +1424,8 @@ function sayChucky(msg, ms){
 // ---- edit-memory glue (aiko) ----
 const MEM_BRAND='aiko';
 let memBaseVer='';
-function memSnapshot(){ return { edits:{...edits}, removed:[...removed], added, persona:{...persona} }; }
-function memApply(st){ for(const k in edits) delete edits[k]; Object.assign(edits, st.edits||{}); removed=new Set(st.removed||[]); added=st.added||[]; persona=Object.assign({occasion:'',guest:''}, st.persona||{}); }
+function memSnapshot(){ return { edits:{...edits}, removed:[...removed], added, order:JSON.parse(JSON.stringify(order)), persona:{...persona} }; }
+function memApply(st){ for(const k in edits) delete edits[k]; Object.assign(edits, st.edits||{}); removed=new Set(st.removed||[]); added=st.added||[]; order=st.order?JSON.parse(JSON.stringify(st.order)):{}; persona=Object.assign({occasion:'',guest:''}, st.persona||{}); }
 function memRebuild(){ buildEditor(); regenerate().then(renderPreview); }
 // ============ EDIT MEMORY — autosave + resume + version history (per brand) ============
 // Glue each editor must define BEFORE this block:
