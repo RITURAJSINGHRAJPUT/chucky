@@ -684,6 +684,20 @@ function opsForPage(fields, priceShift, skip){
         for(let k=i+1;k<n;k++) rep+='Tj\n0 '+fmtNum(lead)+' Td\n('+escPdf(lines[k]||'')+')';
         ops.push({s:sp[0],e:sp[1],rep:enc(rep)});
       });
+    } else if(f.role==='header'){
+      if(!hasEdit) continue;
+      /* Headers are drawn per kerning group — (Ri)Tj 0 Tc 0 Tw (c)Tj 1.471 0 Td (e)Tj — so patching
+         the string literals would leave the stale Td offsets behind. Replace the WHOLE run with one
+         Tm + Tj. The gold `rg` and the /TTn Tf sit BETWEEN the two runs, so they are untouched. */
+      const w=headerAdv(f, val), w0=headerAdv(f, f.display);
+      let hx=f.x;
+      if(f.kind==='script'){                       // keep its offset from the serif word's right edge
+        const sf=FM.fields.find(q=>q.id===f.pair);
+        if(sf){ const sv=(sf.id in edits)?edits[sf.id]:sf.display;
+                hx=f.x + (headerAdv(sf,sv)-headerAdv(sf,sf.display)); }
+      }
+      ops.push({s:f.run_span[0],e:f.run_span[1],
+        rep:enc(fmtNum(f.size)+' 0 0 '+fmtNum(f.size)+' '+fmtNum(hx)+' '+fmtNum(f.y)+' Tm\n0 Tc 0 Tw\n('+escPdf(val)+')Tj')});
     } else if(f.role==='grams'){
       if(hasEdit) ops.push({s:f.tj_span[0],e:f.tj_span[1],rep:enc('('+escPdf(val)+')')});
     }
@@ -963,7 +977,11 @@ function getCaret(el){ const s=getSelection(); if(!s.rangeCount) return null; co
 function setCaret(el,off){ if(off==null) return; let n, rem=off, w=document.createTreeWalker(el,NodeFilter.SHOW_TEXT,null); while(n=w.nextNode()){ if(rem<=n.textContent.length){ const r=document.createRange(); r.setStart(n,rem); r.collapse(true); const s=getSelection(); s.removeAllRanges(); s.addRange(r); return; } rem-=n.textContent.length; } const r=document.createRange(); r.selectNodeContents(el); r.collapse(false); const s=getSelection(); s.removeAllRanges(); s.addRange(r); }
 function highlightField(el){
   const kind=el.dataset.kind, allowed=ALLOWED[kind]||ALLOWED.name;
-  const text=normTypo(el.textContent).toUpperCase(), off=document.activeElement===el?getCaret(el):null;
+  // Uppercase NAMES only. This runs on a 160ms debounce after every keystroke and rewrites
+  // innerHTML, so uppercasing here re-shouted descriptions in the DOM and the next input event
+  // then captured the shouted text — which defeated the sentence-case fix in the capture path.
+  const text=(kind==='name')? normTypo(el.textContent).toUpperCase() : normTypo(el.textContent),
+        off=document.activeElement===el?getCaret(el):null;
   const toks=text.match(/(\s+|[^\s]+)/g)||[]; let html="";
   for(const tok of toks){
     if(/^\s+$/.test(tok)){ html+=tok.replace(/ /g,'&nbsp;'); continue; }
@@ -1007,6 +1025,9 @@ function itemsForPage(p){
   const extras=prices.filter(x=>!used.has(x.id));
   return {items,extras};
 }
+// text width from the header font's own /Widths (1000-unit em), stored on the field
+function headerAdv(f, str){ let w=0; const W=f.widths||{};
+  for(const ch of String(str||'')) w+=(W[ch]||0); return w/1000*f.size; }
 function descText(d){ return (d.id in edits)? edits[d.id] : d.display; }
 
 /* ---- SECTION MODEL ---------------------------------------------------------------------------
