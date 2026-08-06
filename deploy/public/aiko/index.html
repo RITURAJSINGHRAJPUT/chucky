@@ -997,7 +997,10 @@ function itemsForPage(p){
   const items=names.map(n=>{
     const pr=prices.filter(x=>owner[x.id]===n.id).sort((a,b)=>a.x-b.x);
     pr.forEach(x=>used.add(x.id));
-    const d=descs.filter(x=>Math.abs(x.x-n.x)<8 && n.y>x.y && n.y-x.y<62).sort((a,b)=>b.y-a.y)[0]||null;
+    // column-aware, mirroring the grams rule below. The old |dx|<8 window silently dropped a
+    // description whose recorded x was wrong and let the dish reach down to the NEXT dish's text
+    // instead — editing it then spliced into the wrong dish's bytes.
+    const d=descs.filter(x=>x.x>=n.x-2 && x.x<n.x+260 && n.y>x.y && n.y-x.y<62).sort((a,b)=>b.y-a.y)[0]||null;
     const g=grams.filter(x=>x.x>=n.x-2 && x.x<n.x+260 && n.y>x.y && n.y-x.y<62).sort((a,b)=>b.y-a.y)[0]||null;
     return {name:n, prices:pr, desc:d, grams:g, y:n.y, x:n.x};
   }).sort((a,b)=> (Math.abs(a.x-b.x)>40? a.x-b.x : b.y-a.y));
@@ -1250,7 +1253,12 @@ function schedulePreview(){ clearTimeout(ptimer); ptimer=setTimeout(async()=>{ a
 document.getElementById('editor').addEventListener('input', e=>{
   const el=e.target;
   if(el.classList.contains('name')||el.classList.contains('desc')){
-    const t=normTypo(el.textContent).toUpperCase().trim();
+    // Names are set in caps by the artwork; DESCRIPTIONS are sentence case. Force-uppercasing a
+    // description SHOUTED it in the export and, because dataset.orig holds the sentence-case
+    // original, the revert check below could never match — so a description edit could never be
+    // un-recorded once touched.
+    const t=el.classList.contains('name')? normTypo(el.textContent).toUpperCase().trim()
+                                         : normTypo(el.textContent).trim();
     if(t===el.dataset.orig) delete edits[el.dataset.id]; else edits[el.dataset.id]=t;
     if(el.classList.contains('desc')) updateCtr(el);
     clearTimeout(etimer); etimer=setTimeout(()=>{ highlightField(el); updateGate(); }, 160);
