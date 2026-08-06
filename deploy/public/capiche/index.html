@@ -360,16 +360,80 @@ function descTm(f){            // the block's Tm (so we can swap the size)
   f._tm=last?{s:st+last.index,e:st+last.index+last[0].length,size:parseFloat(last[1]),x:parseFloat(last[3]),y:parseFloat(last[4])}:null;
   return f._tm;
 }
+/* ---- STATE-PRESERVING DELETE ----------------------------------------------------------------
+   Deleting a byte span can strip graphics/text state that LATER, UN-DELETED content inherits.
+   The food editors hit this with fonts (see keepFont() in capiche/index.html + the knowledge doc
+   docs/knowledge/fontless-block-inherit-bug.md); these drinks menus hit it with COLOUR. On AHM
+   page 1 the baked Jain marker of MANGO PICANTE carries `0 0.993 1 0  scn`, and the NEW badge
+   starburst immediately after it has NO colour operator of its own -- it renders red purely by
+   inheriting that one. Renaming the drink (or toggling its markers) deletes the marker span, so
+   the badge fell back to the body-text grey and printed dark.
+   Fix: replace a deleted span with whatever state operators inside it are STILL IN EFFECT at the
+   span's END (i.e. not undone by a `Q` within the span). That is exactly the state the original
+   stream had at that byte offset, so the output can only become MORE faithful, never less.
+   Nesting is tracked RELATIVE to the span start (level 0 = the level the span opens at); levels
+   may go NEGATIVE, because photo_span deliberately ends one `Q` below where it began -- so never
+   assume balance and never try to rebalance here (deleting a clip's `re W n` while keeping its
+   `q` would change clipping semantics).
+   NEVER add cm / Tm / Td / W to this set: everything preserved here is POSITION-INVARIANT, which
+   is the only reason it composes with reflowOps (which rewrites every Tm/cm/re it sees) for free. */
+const ST_CLASS={ cs:'cs', CS:'CS', gs:'gs', Tf:'Tf', Tc:'Tc', Tw:'Tw', Tz:'Tz', TL:'TL', Ts:'Ts', Tr:'Tr',
+                 scn:'fill', sc:'fill', rg:'fill', k:'fill', g:'fill',
+                 SCN:'stroke', SC:'stroke', RG:'stroke', K:'stroke', G:'stroke' };
+const ST_ARITY={ cs:1, CS:1, gs:1, Tf:2, Tc:1, Tw:1, Tz:1, TL:1, Ts:1, Tr:1,
+                 rg:3, RG:3, k:4, K:4, g:1, G:1 };   // scn/sc/SCN/SC arity depends on the colour space
+// cs BEFORE fill: scn's operands are interpreted in the CURRENT colour space, so the space must be
+// restored first. Same for CS/stroke.
+const ST_ORDER=['cs','CS','gs','fill','stroke','Tf','Tc','Tw','Tz','TL','Ts','Tr'];
+const PDF_DELIM=/[\s()<>\[\]{}\/%]/;
+function keepState(seg){
+  const n=seg.length, live=Object.create(null);
+  let i=0, lvl=0, opStart=-1, nOps=0, sawOp=false;
+  const operand=st=>{ if(opStart<0) opStart=st; nOps++; };
+  while(i<n){
+    const c=seg[i];
+    if(c<=' '){ i++; continue; }                                            // whitespace / NUL
+    if(c==='%'){ while(i<n&&seg[i]!=='\n'&&seg[i]!=='\r') i++; continue; }   // comment
+    if(c==='('){ const st=i; let d=1; i++;                                   // (literal string): a `q`
+      while(i<n&&d){ const ch=seg[i];                                        // inside description text
+        if(ch==='\\') i++; else if(ch==='(') d++; else if(ch===')') d--;      // must NOT read as save-state
+        i++; }
+      operand(st); continue; }
+    if(c==='<'||c==='['){ operand(i); i++; continue; }                       // <hex> / <<dict>> / [array]
+    if(c==='>'||c===']'){ i++; continue; }
+    if(c==='/'){ const st=i; i++; while(i<n&&!PDF_DELIM.test(seg[i])) i++; operand(st); continue; }
+    if(c==='+'||c==='-'||c==='.'||(c>='0'&&c<='9')){ const st=i; i++;
+      while(i<n&&(seg[i]==='.'||seg[i]==='-'||seg[i]==='+'||(seg[i]>='0'&&seg[i]<='9'))) i++; operand(st); continue; }
+    const st=i; while(i<n&&!PDF_DELIM.test(seg[i])) i++;                     // bare token => operator
+    const op=seg.slice(st,i) || seg[i++];
+    if(op==='q') lvl++;
+    else if(op==='Q'){ lvl--; for(const cl in live) if(live[cl].lvl>lvl) delete live[cl]; }
+    else if(op==='BI'){ const e=seg.indexOf('EI',i); i=(e<0? n : e+2); }     // inline image: skip wholesale
+    else if(ST_CLASS[op]){
+      const want=ST_ARITY[op];
+      // Guard against a span that began mid-operand-run (e.g. "...0.816  scn"): replaying a
+      // truncated operand list would emit malformed PDF. Drop the class instead of guessing.
+      const ok = opStart>=0 && (want!=null ? nOps===want : (nOps>=1 && (sawOp||opStart>0)));
+      if(ok) live[ST_CLASS[op]]={txt:seg.slice(opStart,i), lvl:lvl};
+      else   delete live[ST_CLASS[op]];
+    }
+    sawOp=true; opStart=-1; nOps=0;
+  }
+  let out=''; for(const cl of ST_ORDER) if(live[cl]) out+=live[cl].txt+'\n';
+  return out;
+}
+
 /* Some text blocks in these menus do NOT set their own font (no `Tf`) — they inherit the font
    left active by an EARLIER block. Deleting a span that happens to carry that `Tf` (e.g. a dish's
    baked Jain marker) silently re-fonts every fontless block after it, which renders as missing
    letters (only glyphs present in the inherited subset survive). So when we delete a span, we
    leave its last `Tf` behind: same graphics state, nothing drawn. */
 function keepFont(sp, p){
-  const seg=pageText(p).slice(sp[0],sp[1]);
-  const m=seg.match(/\/[A-Za-z0-9_]+ [\d.]+ Tf/g);
-  return m? m[m.length-1]+'\n' : '';
+  // generalised: colour / Tc / Tw / gs are inherited by later blocks exactly as fonts are,
+  // and dropping them re-colours or re-spaces the rest of the page (see keepState above)
+  return keepState(pageText(p).slice(sp[0],sp[1]));
 }
+
 const _divs={};
 function dividersFor(p){ if(_divs[p]==null) _divs[p]=_dividerLines(pageStreams[p].pristine); return _divs[p]; }
 function gapBelowF(f){         // usable room below: the nearer of the next field and the DIVIDER RULE
@@ -722,7 +786,9 @@ function badgeOps(bytes, page, removedSlots){
   for(const b of badges){
     const owner=badgeOwner(b,page);
     if(owner&&(owner.id in markerEdits)&&!removed.has(owner.id)) continue;   // marker engine owns this dish's badge
-    if(owner&&removed.has(owner.id)){ ops.push({s:b.span[0],e:b.span[1],rep:enc('')}); continue; }   // removed item -> delete its badge
+    if(owner&&removed.has(owner.id)){ // _badges() extends this span BACKWARDS past the q to swallow
+        // an un-nested `0 0.988 1 0 k`; dropping it turns later headings (APPETIZERS) grey
+        ops.push({s:b.span[0],e:b.span[1],rep:enc(keepState(pageText(p).slice(b.span[0],b.span[1])))}); continue; }   // removed item -> delete its badge
     let shift=0;   // survivor below a removed slot -> ride up by the removed height (same as dividers)
     for(const rs of (removedSlots||[])){ if(b.x>=rs.cmin&&b.x<rs.cmax&&b.y<=rs.y-Math.abs(rs.h)/2) shift+=Math.abs(rs.h); }
     if(shift>0){ const txt=s.slice(b.span[0],b.span[1]).replace(/(1 0 0 1 -?[\d.]+ )(-?[\d.]+)( cm)/g,(mm,a,y,c)=>a+fmtNum(parseFloat(y)+shift)+c); ops.push({s:b.span[0],e:b.span[1],rep:enc(txt)}); }
