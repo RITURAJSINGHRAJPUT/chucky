@@ -10,6 +10,12 @@
 #
 # The Cloudflare Worker is untouched and still serves the old workers.dev URL.
 
+# Local dev server. Pinned so `netlify dev` always comes up on the same port — the editors are
+# opened from a phone/tablet on the LAN during testing, so a shifting port is a nuisance.
+[dev]
+  port      = 3008
+  framework = "#static"
+
 [build]
   publish   = "deploy/public"
   command   = ""

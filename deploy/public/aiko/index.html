@@ -565,10 +565,35 @@ function structuralForPage(p, pristine){
     const cidx=y=>{ let bi=0,bd=1e9; ny.forEach((yy,i)=>{const d=Math.abs(yy-y); if(d<bd){bd=d;bi=i;}}); return bi; };
     const top=i=>ny[i];
     const remSet=new Set(removedYs.map(cidx));
-    const slotH=i=> i<ny.length-1? ny[i]-ny[i+1] : (i>0? ny[i-1]-ny[i]:0);
+    /* Slot height and reflow are SECTION-scoped, not column-scoped. Two sections share a column
+       (SIDES+MAINS on the left, DIMSUM+SUSHI on the right), so measuring a slot as "distance to the
+       next name in the column" makes the LAST dish of a section look enormous — TOKYO PIZZA scored
+       81.19 instead of its real ~41, because the next name down is THAI CURRY in MAINS. Removing it
+       then shifted the whole MAINS section (heading included) up by 81pt, straight onto the
+       description above it. A section is its own stack: removing from one must never move another. */
+    const _model=sectionModel(p);
+    // Precompute, ONCE per column, each name-row's dish id / section / own height. Doing this by
+    // "nearest dish y across all sections" was fragile and silently returned the wrong section,
+    // which stopped MAINS reflowing inside itself.
+    const _rowId=[], _rowSec=[], _rowH=[];
+    ny.forEach((yy,i)=>{
+      const f=FM.fields.find(q=>q.page===p&&q.role==='name'&&Math.abs(q.y-yy)<0.01&&q.x>=col.min&&q.x<col.max);
+      _rowId[i]=f?f.id:null; _rowSec[i]=null; _rowH[i]=null;
+      if(!f) return;
+      for(const L in _model){ const m=_model[L];
+        if(m.ids.indexOf(f.id)>=0){ _rowSec[i]=L; _rowH[i]=m.h[f.id]; break; } }
+    });
+    // a dish's own height, from its section's stack (the last dish uses the section's gap_below,
+    // NOT the distance to the next name in the column — that crosses into the next section)
+    const slotH=i=> (_rowH[i]!=null)? _rowH[i]
+      : (i<ny.length-1? ny[i]-ny[i+1] : (i>0? ny[i-1]-ny[i]:0));
     // owner of a y: the nearest name that actually CLAIMS it (see _ownsRun); -1 means page chrome
     const owner=y=>{ const j=cidx(y); return _ownsRun(ny[j],y,slotH(j))? j : -1; };
-    const shiftFor=j=>{ let d=0; for(const k of remSet){ if(k<j) d+=slotH(k); } return d; };
+    // only removals in the SAME section push a dish down-list
+    // only removals in the SAME section push a dish up its own stack
+    const shiftFor=j=>{ let d=0;
+      for(const k of remSet){ if(k<j && _rowSec[k]!=null && _rowSec[k]===_rowSec[j]) d+=slotH(k); }
+      return d; };
     // DELETE per RUN, not per block: only the text runs the removed dish actually owns. The block's
     // BT/rg/Tf prologue and any inter-run Tc/Tw survive, so nothing downstream is re-coloured.
     for(const r of runs){
@@ -698,6 +723,12 @@ function opsForPage(fields, priceShift, skip){
       }
       ops.push({s:f.run_span[0],e:f.run_span[1],
         rep:enc(fmtNum(f.size)+' 0 0 '+fmtNum(f.size)+' '+fmtNum(hx)+' '+fmtNum(f.y)+' Tm\n0 Tc 0 Tw\n('+escPdf(val)+')Tj')});
+      // The gold flourish under a script word is a stroked path whose cm origin sits INSIDE the
+      // word. It cannot stretch, so move it by exactly the delta the word moved — that preserves
+      // its baked offset from the word's start. Without this a wider retyped word slides underneath
+      // the stationary squiggle and the two collide.
+      if(f.flourish_cm && Math.abs(hx-f.x)>0.005)
+        ops.push({s:f.flourish_cm[0],e:f.flourish_cm[1],rep:enc(fmtNum(f.flourish_x+(hx-f.x)))});
     } else if(f.role==='grams'){
       if(hasEdit) ops.push({s:f.tj_span[0],e:f.tj_span[1],rep:enc('('+escPdf(val)+')')});
     }

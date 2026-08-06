@@ -32,6 +32,12 @@ import pikepdf, re, json, sys, os, shutil, time
 # the 4th operand and the span would start mid-Tm (which silently blanked the retyped word).
 TM = re.compile(r'(?P<sz>[\d.]+) 0 0 [\d.]+ (?P<x>-?[\d.]+) (?P<y>-?[\d.]+) Tm')
 TF = re.compile(r'/(TT\d) 1 Tf')
+GOLD = '0.933 0.698 0.169 RG'
+# the hand-lettered gold underline that follows each SCRIPT word. Its cm origin sits INSIDE the
+# word's own span, so it is an underline, not a trailing mark — and it must travel with the word or
+# a retyped (wider) word slides underneath it and the two collide.
+QTOK = re.compile(r'(?<![^\s])(q|Q)(?![^\s])')
+FLOUR = re.compile(r'q 1 0 0 1 (?P<fx>-?[\d.]+) (?P<fy>-?[\d.]+) cm')
 SHOW = re.compile(r'\(((?:[^()\\]|\\.)*)\)\s*Tj')
 
 
@@ -113,13 +119,34 @@ def main():
             if not cand:
                 continue
             r = min(cand, key=lambda r: r['y'] - first_y)
-            made.append({'role': 'header', 'page': pno, 'id': f'h{sec_i}:{kind}',
+            fld = {'role': 'header', 'page': pno, 'id': f'h{sec_i}:{kind}',
                          'section': sec_i, 'label': sec['label'], 'kind': kind,
                          'font': '/' + font, 'size': round(r['size'], 4),
                          'x': round(r['x'], 4), 'y': round(r['y'], 4),
                          'run_span': r['span'], 'display': r['text'],
                          'charset': charset, 'widths': widths,
-                         'pair': f'h{sec_i}:' + ('script' if kind == 'serif' else 'serif')})
+                         'pair': f'h{sec_i}:' + ('script' if kind == 'serif' else 'serif')}
+            if kind == 'script':
+                # Each script word is drawn TWICE: filled text, then a STROKED VECTOR OUTLINE of the
+                # same letterforms (gold RG) for the hand-lettered look. That outline is art, not
+                # text — it cannot be retyped, and leaving it in place after an edit leaves ghost
+                # letters of the OLD word sitting over the new one. Capture the whole balanced
+                # q..Q so the emitter can drop it. Skip rather than guess if the shape differs.
+                seg = raw[r['span'][1]: r['span'][1] + 9000]
+                gi = seg.find(GOLD)
+                if gi >= 0:
+                    oq = seg.rfind('\nq\n', 0, gi)
+                    # balance q/Q as OPERATOR TOKENS: the inner group is "q 1 0 0 1 .. cm" with a
+                    # space, so matching only "\nq\n" undercounts the opens and closes early.
+                    d = 0; end = None
+                    for t in QTOK.finditer(seg, oq):
+                        d += 1 if t.group(1) == 'q' else -1
+                        if d == 0: end = t.end(); break
+                    # the outline is 2 stroked sub-paths inside one clip; require a balanced block
+                    # that contains the gold stroke and no text, else skip rather than guess
+                    if oq >= 0 and end and GOLD in seg[oq:end] and 'BT' not in seg[oq:end]:
+                        fld['stroke_span'] = [r['span'][1] + oq, r['span'][1] + end]
+            made.append(fld)
 
     # ---- gates ----
     seen = {}
@@ -134,6 +161,15 @@ def main():
             assert h['run_span'][1] <= o[0] or h['run_span'][0] >= o[1], \
                 f"{h['id']} overlaps another header run"
         seen.setdefault(h['page'], []).append(h['run_span'])
+    scripts = [h for h in made if h['kind'] == 'script']
+    missing = [h['id'] for h in scripts if 'stroke_span' not in h]
+    assert not missing, f'no gold outline block captured for {missing}'
+    for h in scripts:
+        raw = bytes(pdf.pages[h['page']].Contents.read_bytes()).decode('latin-1')
+        blk = raw[h['stroke_span'][0]:h['stroke_span'][1]]
+        assert blk.count('q') - blk.count('Q') == 0, f"{h['id']}: outline block unbalanced"
+        assert GOLD in blk, f"{h['id']}: captured block is not the gold outline"
+        assert 'BT' not in blk, f"{h['id']}: outline block swallowed a text block"
     per_sec = {}
     for h in made: per_sec.setdefault(h['section'], []).append(h['kind'])
     for i, ks in per_sec.items():
