@@ -491,6 +491,24 @@ function _blocks(b){const T=_toks(b),B=[],nb=[];let dep=0,qs=-1,qa=null,bs=-1,ba
     else if(op==='ET'){if(bs>=0){B.push({span:[bs,k.e],kind:'text',x:ba?ba[0]:null,y:ba?ba[1]:null});bs=-1;}}
     nb.length=0;}
   return B;}
+/* Sibling icons baked under ONE shared clip wrapper (`q .. re W n .. Q`, e.g. a dairy+jain pair
+   drawn back-to-back for one dish) collapse to a SINGLE _blocks() entry keyed off whichever icon's
+   `cm` happened to come first, because _blocks() tracks one `qa` shared across every nesting depth.
+   The other icon's own position is lost, its span balloons to cover both, and if that first icon's
+   y falls outside _ownsArt's window the whole pair silently survives a removal. Track `qa` PER OPEN
+   q instead of globally, and emit a block for every q..Q pair (any depth) that captured its own
+   direct `cm` -- so each icon gets its own accurate span/position, while the outer wrapper (no `cm`
+   of its own) yields x:null,y:null and is skipped by the existing `b.x===null` filter. */
+function _leafQBlocks(b){const T=_toks(b),B=[],nb=[];const stack=[];
+  for(const k of T){if(k.t===0){nb.push(k);continue;}if(k.t===1||k.t===2){nb.length=0;continue;}
+    const op=_dec(b,k);
+    if(op==='q'){stack.push({qs:k.s,qa:null});}
+    else if(op==='Q'){const fr=stack.pop(); if(fr) B.push({span:[fr.qs,k.e],kind:'q',x:fr.qa?fr.qa[0]:null,y:fr.qa?fr.qa[1]:null});}
+    else if(op==='cm'){const a=nb.slice(-6).map(x=>_nv(b,x));
+      if(a.length===6&&Math.abs(a[0]-1)<1e-6&&Math.abs(a[3]-1)<1e-6&&Math.abs(a[1])<1e-9&&Math.abs(a[2])<1e-9){
+        const top=stack[stack.length-1]; if(top&&top.qa===null) top.qa=[a[4],a[5]]; } }
+    nb.length=0;}
+  return B;}
 /* ---- TEXT RUNS ------------------------------------------------------------------------------
    Illustrator does NOT put one dish per BT..ET. It bundles section headings, the page legend, the
    intro blurb and OTHER dishes' "NPCS" superscripts inside a neighbouring dish's block — e.g. the
@@ -532,7 +550,7 @@ function _ownsRun(ny, ry, slotH){ const d=ny-ry; return d>=-12 && d<=Math.max(sl
    raised artwork (at ny-slot+5.8) and would let a dish claim its neighbour's icons: reordering
    BURNT GARLIC RICE dragged MUSHROOM TRUFFLE's icon along with it, and removal had the same latent
    bug. Artwork therefore gets its own tight window. */
-function _ownsArt(ny, ry){ const d=ny-ry; return d>=-12 && d<=0.5; }
+function _ownsArt(ny, ry, extraBelow){ const d=ny-ry; return d>=-12 && d<=0.5+(extraBelow||0); }
 function _cluster(blocks,cmin,cmax,gap){gap=gap||18;
   const bs=blocks.filter(b=>b.x!==null&&b.x>=cmin&&b.x<=cmax&&b.y!==null).sort((a,b)=>b.y-a.y);
   const cl=[];let cur=[];for(const b of bs){if(!cur.length)cur=[b];else if(cur[cur.length-1].y-b.y<=gap)cur.push(b);else{cl.push(cur);cur=[b];}}
@@ -553,7 +571,7 @@ function structuralForPage(p, pristine){
   const removedHere=FM.fields.filter(f=>f.page===p&&f.role==='name'&&removed.has(f.id));
   const reorderHere=Object.keys(order).some(k=>k.split('|')[0]==String(p)&&order[k]&&order[k].length);
   if(!removedHere.length&&!reorderHere) return {deletes:[],shiftOps:[],priceShift:{},skip:new Set()};
-  const blocks=_blocks(pristine), anchors=_anchors(pristine), runs=_textRuns(pristine);
+  const blocks=_leafQBlocks(pristine), anchors=_anchors(pristine), runs=_textRuns(pristine);
   const cols=pageColumns(p);
   const priceTm=FM.fields.filter(f=>f.page===p&&f.role==='price');
   const deletes=[], shiftOps=[], priceShift={}, removedSlots=[]; const skip=new Set();

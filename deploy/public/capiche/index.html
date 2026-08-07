@@ -524,6 +524,27 @@ function _blocks(b){const T=_toks(b),B=[],nb=[];let dep=0,qs=-1,qa=null,bs=-1,ba
     else if(op==='ET'){if(bs>=0){B.push({span:[bs,k.e],kind:'text',x:ba?ba[0]:null,y:ba?ba[1]:null});bs=-1;}}
     nb.length=0;}
   return B;}
+/* Sibling icons baked under ONE shared clip wrapper (`q .. re W n .. Q`, e.g. a dairy+gluten pair
+   drawn back-to-back for one dish) collapse to a SINGLE _blocks() entry keyed off whichever icon's
+   `cm` happened to come first, because _blocks() tracks one `qa` shared across every nesting depth.
+   The other icon's own position is lost, its span balloons to cover both, and if that first icon's
+   y falls outside _ownsArt's window the whole pair silently survives a removal (confirmed on
+   PISTACHIO MOUSSE CAKE: removing it leaves its dairy+gluten group floating over whatever reflowed
+   into its slot). Track `qa` PER OPEN q instead of globally, and emit a block for every q..Q pair
+   (any depth) that captured its own direct `cm` -- so each icon (dairy's q, gluten's q, and a
+   compound icon's own outer q even if it nests a further clip inside, like the Korea roundel) gets
+   its own accurate span/position, while the outer wrapper (no `cm` of its own) yields x:null,y:null
+   and is skipped by the existing `b.x===null` filter. */
+function _leafQBlocks(b){const T=_toks(b),B=[],nb=[];const stack=[];
+  for(const k of T){if(k.t===0){nb.push(k);continue;}if(k.t===1||k.t===2){nb.length=0;continue;}
+    const op=_dec(b,k);
+    if(op==='q'){stack.push({qs:k.s,qa:null});}
+    else if(op==='Q'){const fr=stack.pop(); if(fr) B.push({span:[fr.qs,k.e],kind:'q',x:fr.qa?fr.qa[0]:null,y:fr.qa?fr.qa[1]:null});}
+    else if(op==='cm'){const a=nb.slice(-6).map(x=>_nv(b,x));
+      if(a.length===6&&Math.abs(a[0]-1)<1e-6&&Math.abs(a[3]-1)<1e-6&&Math.abs(a[1])<1e-9&&Math.abs(a[2])<1e-9){
+        const top=stack[stack.length-1]; if(top&&top.qa===null) top.qa=[a[4],a[5]]; } }
+    nb.length=0;}
+  return B;}
 /* ---- TEXT RUNS ------------------------------------------------------------------------------
    Illustrator does NOT put one dish per BT..ET. It bundles section headings, the page legend, the
    intro blurb and OTHER dishes' "NPCS" superscripts inside a neighbouring dish's block — e.g. the
@@ -565,7 +586,7 @@ function _ownsRun(ny, ry, slotH){ const d=ny-ry; return d>=-12 && d<=Math.max(sl
    raised artwork (at ny-slot+5.8) and would let a dish claim its neighbour's icons: reordering
    BURNT GARLIC RICE dragged MUSHROOM TRUFFLE's icon along with it, and removal had the same latent
    bug. Artwork therefore gets its own tight window. */
-function _ownsArt(ny, ry){ const d=ny-ry; return d>=-12 && d<=0.5; }
+function _ownsArt(ny, ry, extraBelow){ const d=ny-ry; return d>=-12 && d<=0.5+(extraBelow||0); }
 function _cluster(blocks,cmin,cmax,gap){gap=gap||18;
   const bs=blocks.filter(b=>b.x!==null&&b.x>=cmin&&b.x<=cmax&&b.y!==null).sort((a,b)=>b.y-a.y);
   const cl=[];let cur=[];for(const b of bs){if(!cur.length)cur=[b];else if(cur[cur.length-1].y-b.y<=gap)cur.push(b);else{cl.push(cur);cur=[b];}}
@@ -581,7 +602,7 @@ let _structCache={sig:null,byPage:{}};
 function structuralForPage(p, pristine){
   const removedHere=FM.fields.filter(f=>f.page===p&&f.role==='name'&&removed.has(f.id));
   if(!removedHere.length) return {deletes:[],shiftOps:[],priceShift:{},skip:new Set()};
-  const blocks=_blocks(pristine), anchors=_anchors(pristine), runs=_textRuns(pristine);
+  const blocks=_leafQBlocks(pristine), anchors=_anchors(pristine), runs=_textRuns(pristine);
   const cols=pageColumns(p);
   const priceTm=FM.fields.filter(f=>f.page===p&&f.role==='price');
   const deletes=[], shiftOps=[], priceShift={}, removedSlots=[]; const skip=new Set();
@@ -606,6 +627,12 @@ function structuralForPage(p, pristine){
       return (best||ba||{}).label||null; };
     const _rowSec=ny.map(yy=>{ const f=FM.fields.find(q=>q.page===p&&q.role==='name'&&Math.abs(q.y-yy)<0.01&&q.x>=col.min&&q.x<col.max);
       return f? _secAt(f.x,f.y) : null; });
+    // a name that wraps to 2+ lines bakes its marker row near the LAST line, well below the name's
+    // own (first-line) y -- e.g. PISTACHIO MOUSSE CAKE's dairy/gluten icons sit ~12pt under its own
+    // baseline. _ownsArt's window is tight by design (see its own comment) to stop a dish claiming
+    // its neighbour's icons, so widen it only for rows that actually wrap, by one line's worth.
+    const _rowLines=ny.map(yy=>{ const f=FM.fields.find(q=>q.page===p&&q.role==='name'&&Math.abs(q.y-yy)<0.01&&q.x>=col.min&&q.x<col.max);
+      return (f&&f.lines&&f.lines.length>1)? f.lines.length : 1; });
     // a row's own height: to the next name IN THE SAME SECTION, else the previous gap
     const slotH=i=>{ for(let k=i+1;k<ny.length;k++) if(_rowSec[k]===_rowSec[i]) return ny[i]-ny[k];
       for(let k=i-1;k>=0;k--) if(_rowSec[k]===_rowSec[i]) return ny[k]-ny[i];
@@ -630,17 +657,13 @@ function structuralForPage(p, pristine){
       const j=owner(r.y);
       if(j>=0&&remSet.has(j)) deletes.push(r.span);
     }
-    // self-contained q..Q artwork sits just ABOVE its own dish's name -> tighter window.
-    // KNOWN GAP: a few removals leave an allergen-icon group behind, floating over whatever
-    // reflowed up into the slot. Confirmed by render on CHILLI BUTTER CORN (0:26, 2 icons); a
-    // shift-invariant count over all 37 single-dish removals also flags CHOCOLATE CRUNCH CAKE
-    // (1:12, 1 short) and CARAMELISED ONION PASTA (1:45, 3 short). NOT a cidx() mis-attribution --
-    // scanning every row for the true _ownsArt owner instead changes nothing -- so those icons are
-    // not reaching this loop as `kind:'q'` blocks carrying an x/y at all. Needs _blocks() work.
+    // self-contained q..Q artwork sits just ABOVE its own dish's name -> tighter window. `blocks`
+    // is per-icon leaf blocks (see _leafQBlocks), so a multi-icon cluster's second/third icon each
+    // carry their own accurate x/y instead of collapsing into one block keyed off the first.
     for(const b of blocks){
       if(b.kind!=='q'||b.x===null||b.y===null||b.x<col.min||b.x>col.max) continue;
       const j=cidx(b.y);
-      if(_ownsArt(ny[j],b.y)&&remSet.has(j)) deletes.push(b.span);
+      if(_ownsArt(ny[j],b.y,(_rowLines[j]-1)*16)&&remSet.has(j)) deletes.push(b.span);
     }
     for(const j of remSet) removedSlots.push({cmin:col.min,cmax:col.max,y:top(j),h:slotH(j)});
     // SHIFT per anchor, judged on its OWN y -- NOT on ownership. Chrome (section headings) must
@@ -950,15 +973,30 @@ async function regenerate(){
     const inDiv = (s,e)=> divs.some(d=> d.full[0]<=s && e<=d.full[1]);
     const shiftOps = st.shiftOps.filter(o=> !inDiv(o.s,o.e) && !inBadge(o.s,o.e) && !inMarker(o.s,o.e));   // divider/badge/marker cms handled by own-Y, not block-shift
     let ops = opsForPage(FM.fields.filter(f=>f.page===p), st.priceShift, skip).concat(shiftOps);
-    // carve divider AND badge spans out of block-deletes so bundled ones are never collaterally deleted
+    // carve divider AND badge spans out of block-deletes so bundled ones are never collaterally deleted.
+    // A removed dish's own NEW badge is a case where this now runs the OTHER way: the per-icon leaf
+    // block for its badge (from `blocks`, small) can fall entirely INSIDE the badge span `_badges()`
+    // found (bigger, since it groups the starburst + 3 letters into one span) -- the original carve
+    // only checked "protect region inside the delete", so a smaller delete nested inside a protect
+    // region sailed through untouched and collided with badgeOps' own op for the same bytes, and
+    // spliceBytes (which assumes non-overlapping ops) corrupted the stream past that point. Carve out
+    // ANY overlap, in either direction, not just full containment of protect-inside-delete.
     const protect=[...divs.map(v=>v.full), ...bdg.spans].sort((a,b)=>a[0]-b[0]);
     let dels=[];
     for(const d of st.deletes){
-      const inside = protect.filter(v=> d[0]<=v[0] && v[1]<=d[1]).sort((a,b)=>a[0]-b[0]);
-      if(!inside.length){ dels.push(d); continue; }
-      let cur=d[0];
-      for(const v of inside){ if(v[0]>cur) dels.push([cur,v[0]]); cur=v[1]; }
-      if(cur<d[1]) dels.push([cur,d[1]]);
+      const overlapping = protect.filter(v=> v[0]<d[1] && v[1]>d[0]);
+      if(!overlapping.length){ dels.push(d); continue; }
+      let segs=[[d[0],d[1]]];
+      for(const v of overlapping){
+        const next=[];
+        for(const seg of segs){
+          if(v[1]<=seg[0]||v[0]>=seg[1]){ next.push(seg); continue; }
+          if(v[0]>seg[0]) next.push([seg[0],v[0]]);
+          if(v[1]<seg[1]) next.push([v[1],seg[1]]);
+        }
+        segs=next;
+      }
+      for(const seg of segs) if(seg[1]>seg[0]) dels.push(seg);
     }
     // Merge before emitting. Deleting per TEXT RUN (rather than per BT..ET block) produces many
     // more spans, and adjacent runs' spans touch or nest -- spliceBytes assumes non-overlapping ops
