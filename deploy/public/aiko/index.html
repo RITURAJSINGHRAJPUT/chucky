@@ -1210,6 +1210,21 @@ function buildEditor(){
   const rmCount=items.filter(it=>removed.has(it.name.id)).length;
   const _secs=(typeof sectionsForPage==='function')?sectionsForPage(activePage):[];
   const _secOf={}; (function(){ const so=(it)=>{ const ix=it.name.x, iy=it.name.y; let best='',bs=Infinity; for(const s of _secs){ const dx=Math.abs(s.col_x-ix); if(dx>140) continue; if(iy<(s.last_y-2)) continue; const sc=(iy-s.last_y)+dx*0.01; if(sc<bs){bs=sc;best=s.label;} } return best; }; for(const it of items) _secOf[it.name.id]=so(it); })();
+  // Re-sequence cards within each section to match the user's current order (secOrder). Without
+  // this, itemsForPage() always hands back pristine top-to-bottom order, so the move up/down
+  // buttons below correctly rewrote `order` and the exported PDF but the on-screen list snapped
+  // right back -- a click looked like it did nothing.
+  (function(){
+    const byId={}; for(const it of items) byId[it.name.id]=it;
+    const seen=new Set(), secSeq=[];
+    for(const it of items){ const L=_secOf[it.name.id]||''; if(!seen.has(L)){ seen.add(L); secSeq.push(L); } }
+    const reseq=[];
+    for(const L of secSeq){
+      if(!L){ for(const it of items) if((_secOf[it.name.id]||'')===L) reseq.push(it); continue; }
+      for(const id of secOrder(activePage,L)) if(byId[id]) reseq.push(byId[id]);
+    }
+    if(reseq.length===items.length){ items.length=0; items.push(...reseq); }   // safety net: counts must match exactly
+  })();
   window.__secCounts={};
   for(const it of items){ const L=_secOf[it.name.id]||'—'; if(!(L in window.__secCounts)) window.__secCounts[L]={live:0}; if(!removed.has(it.name.id)) window.__secCounts[L].live++; }
   let _lastSec=null, _secIdx=-1;
