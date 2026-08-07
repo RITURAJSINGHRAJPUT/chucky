@@ -289,9 +289,9 @@ function personaCover(p){
   if(p!==COVER.page || (!persona.occasion && !persona.guest)) return { del:[], add:'' };
   return { del:(COVER.del||[]).slice(), add: personaLine(COVER.occ, persona.occasion)+personaLine(COVER.guest, persona.guest) };
 }
-const MARKER_TYPES=['dairy','gluten','jain','spicy','new'];
-const MARKER_LABEL={dairy:'Dairy',gluten:'Gluten',jain:'Jain',spicy:'Ghaslet',new:'NEW'};
-const MARKER_ICON={dairy:'🥛',gluten:'🌾',jain:'Ⓙ',spicy:'🌶️',new:'★'};
+const MARKER_TYPES=['dairy','gluten','jain','spicy','korea','new'];
+const MARKER_LABEL={dairy:'Dairy',gluten:'Gluten',jain:'Jain',spicy:'Ghaslet',korea:'Korea',new:'NEW'};
+const MARKER_ICON={dairy:'🥛',gluten:'🌾',jain:'Ⓙ',spicy:'🌶️',korea:'🇰🇷',new:'★'};
 function dishMarkers(id){ return (id in markerEdits) ? new Set(markerEdits[id]) : new Set((FIELD[id]&&FIELD[id].markers)||[]); }
 let addSeq = 0;          // field id -> new text
 let doc, pageStreams=[], pdfBytesOrig;
@@ -728,18 +728,35 @@ function jStamp(parts, tx, ty){
   }
   return out;
 }
+// ---- Korean-origin roundel: drawn from vector primitives (ported from Aiko), not an extracted
+// PDF template -- self-contained fills/strokes only, no font resource dependency.
+const FR=3.35, FCY=4.6, FD=2*FR;   // Ø≈6.7pt, centre 4.6pt above baseline
+function _circ(cx,cy,r){ const k=0.5523*r,P=(a,b,c,d,e,f)=>[a,b,c,d,e,f].map(jFmt).join(' ')+' c';
+  return jFmt(cx+r)+' '+jFmt(cy)+' m '+P(cx+r,cy+k,cx+k,cy+r,cx,cy+r)+' '+P(cx-k,cy+r,cx-r,cy+k,cx-r,cy)+' '+P(cx-r,cy-k,cx-k,cy-r,cx,cy-r)+' '+P(cx+k,cy-r,cx+r,cy-k,cx+r,cy)+' h'; }
+function _halfdisk(cx,cy,r,top){ const k=0.5523*r,P=(a,b,c,d,e,f)=>[a,b,c,d,e,f].map(jFmt).join(' ')+' c'; const s=top?1:-1;
+  return jFmt(cx-r)+' '+jFmt(cy)+' m '+P(cx-r,cy+s*k,cx-k,cy+s*r,cx,cy+s*r)+' '+P(cx+k,cy+s*r,cx+r,cy+s*k,cx+r,cy)+' h'; }
+function flagBody(c){
+  const CX=FR, CY=FCY, L=CX-FR, B=CY-FR, D=FD;
+  const f=(col,p)=>col+' rg\n'+p+'\nf\n';
+  let s='q\n'+_circ(CX,CY,FR)+'\nW n\n';
+  if(c==='korea'){ s+=f('1 1 1',jFmt(L)+' '+jFmt(B)+' '+jFmt(D)+' '+jFmt(D)+' re')+f('0.8 0.18 0.23',_halfdisk(CX,CY,FR*0.62,true))+f('0.13 0.23 0.46',_halfdisk(CX,CY,FR*0.62,false)); }
+  s+='Q\n';
+  s+='0.42 0.4 0.36 RG\n0.35 w\n'+_circ(CX,CY,FR)+'\nS\n';
+  return s;
+}
 // Stamp a dish's marker set at its name-baseline anchor (bx0,Yb). Mirrors the baked packing:
 // absolute per-icon offsets from add_const, so a re-stamp lands exactly where the originals were.
 function stampMarkers(bx0, Yb, set, page){
   const C=AC, F=C.fonts, IC=C.ink_color; let out='';
   const jf=(FM.jfont_by_page&&FM.jfont_by_page[page])||F.j;   // AOMonoBold resource name differs per page
-  const OFF={dairy:C.icon_dairy,gluten:C.icon_gluten,jain:C.icon_j,spicy:C.icon_spicy,new:C.icon_badge};
+  const OFF={dairy:C.icon_dairy,gluten:C.icon_gluten,jain:C.icon_j,spicy:C.icon_spicy,korea:C.icon_korea,new:C.icon_badge};
   const spDx = set.has('jain') ? 17.79 : 12.0;   // flame packs after J when Jain present, else tighter (matches baked)
   for(const t of MARKER_TYPES){
     if(!set.has(t)||!OFF[t]) continue;
     const dx = (t==='spicy') ? spDx : OFF[t][0];
     const X=bx0+dx, Y=Yb+OFF[t][1];
     if(t==='jain') out+='BT\n'+IC+'\n'+jf+' 1 Tf\n0 Tc 0 Tw '+C.j_size+' 0 0 '+C.j_size+' '+jFmt(X)+' '+jFmt(Y)+' Tm\n(J)Tj\nET\n';
+    else if(t==='korea') out+='q 1 0 0 1 '+jFmt(X)+' '+jFmt(Y)+' cm\n'+flagBody('korea')+'Q\n';
     else if(t==='new'){ if(ICONS.newbadge) out+=jStamp(ICONS.newbadge, X, Y).trim()+'\n'; }
     else if(ICONS[t]) out+=jStamp(ICONS[t], X, Y).trim()+'\n';
   }
@@ -776,6 +793,7 @@ function buildItemJS(it, sec, Y){
   if(al.has('dairy')){  p.push(jStamp(ICONS.dairy,  ix, Y+C.icon_dairy[1]).trim());  ix+=DW; }
   if(al.has('gluten')){ p.push(jStamp(ICONS.gluten, ix, Y+C.icon_gluten[1]).trim()); ix+=GW; }
   if(al.has('jain')){   p.push('BT\n'+IC+'\n'+F.j+' 1 Tf\n0 Tc 0 Tw '+C.j_size+' 0 0 '+C.j_size+' '+jFmt(ix)+' '+jFmt(Y+C.icon_j[1])+' Tm\n(J)Tj\nET'); ix+=JW; }
+  if(al.has('korea'))   p.push('q 1 0 0 1 '+jFmt(bx+C.icon_korea[0])+' '+jFmt(Y+C.icon_korea[1])+' cm\n'+flagBody('korea')+'Q');
   if(al.has('new'))     p.push(jStamp(ICONS.newbadge, ix+BG, Y+C.icon_badge[1]).trim());
   p.push('0.727 0.668 0.652 0.813 K\n0.464 w\nq 1 0 0 1 '+jFmt(NX)+' '+jFmt(Y+19.5)+' cm\n0 0 m\n'+jFmt(sec.divider_w)+' 0 l\nS\nQ');
   const sz=PAGES[sec.page]||[841.89,595.276], W=sz[0], H=sz[1];
@@ -1073,6 +1091,7 @@ function renderAddZone(ed){
     +'<label><input type="checkbox" class="af-a" value="dairy" checked> Dairy</label>'
     +'<label><input type="checkbox" class="af-a" value="gluten" checked> Gluten</label>'
     +'<label><input type="checkbox" class="af-a" value="jain"> Jain</label>'
+    +'<label><input type="checkbox" class="af-a" value="korea"> Korea</label>'
     +'<label><input type="checkbox" class="af-a" value="new" checked> NEW badge</label></div>'
     +'<div class="afbtns"><button class="afadd">Add to menu</button><button class="afcancel">Cancel</button></div>';
   btn.onclick=()=>{ form.classList.toggle('open'); if(form.classList.contains('open')) form.querySelector('.af-name').focus(); };

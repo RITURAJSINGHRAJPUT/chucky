@@ -239,13 +239,12 @@ const { PDFDocument, PDFName, PDFNumber, PDFRawStream } = PDFLib;
 pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
 
 const BRAND = { name:'Aiko', pdf:'aiko.pdf', download:'Aiko_Menu.pdf', dictKey:'aiko_dict',
-  markers:['dairy','gluten','sesame','jain'] };
+  markers:['dairy','gluten','sesame','jain','korea','new'] };
 let FM, BASE, CULINARY, ALLOWED, ADV, PAGES, FIELD={}, ICONS, SECTIONS, AC;
 let BASE_LIST=[], CULINARY_LIST=[];
 const IGNORED = new Set(), MENU = new Set();
 const edits = {};
 const allerEdits = {};   // nameId -> [allergens]  (per-item allergen toggles on existing items)
-const originEdits = {};   // nameId -> country|null  (per-item cuisine-origin flag toggles)
 let removed = new Set();
 let added = [];   // [{sec, name, desc, price, allergens:[], _id}]
 let order = {};   // 'page|SECTION' -> [dishId,...] user reordering WITHIN that section
@@ -773,8 +772,14 @@ function markerBody(al, bx, baseline){
   const gap=(C.icon_gap!=null?C.icon_gap:1.7);
   const set=new Set(al); let cur=bx, body='';
   for(const m of order){
-    if(!set.has(m)||!ICONS||!ICONS[m]) continue;
+    if(!set.has(m)) continue;
     const g=geo[m]||{dy:0,ox:0,w:8};
+    if(m==='korea'){   // drawn from vector primitives, not an extracted ICONS template
+      const x=cur-(g.ox||0), y=baseline+(g.dy||0);
+      body+='q 1 0 0 1 '+jFmt(x)+' '+jFmt(y)+' cm\n'+flagBody('korea')+'Q\n';
+      cur+=(g.w||8)+gap; continue;
+    }
+    if(!ICONS||!ICONS[m]) continue;
     body+=jStamp(ICONS[m], cur-(g.ox||0), baseline+(g.dy||0));   // align icon's visual left to cur
     cur+=(g.w||8)+gap;                                            // advance by real icon width
   }
@@ -790,8 +795,6 @@ function markerGroup(al, bx, baseline, page){
 function itemShift(f, removedSlots){ let d=0; for(const rs of (removedSlots||[])){ if(f.x>=rs.cmin && f.x<rs.cmax && rs.y>f.y) d+=Math.abs(rs.h); } return d; }
 
 // ---- cuisine-origin flags: tiny PDF-native flags drawn from authored shapes ----
-const FLAG_COUNTRIES=['korea','japan','china','thailand','india','srilanka'];
-const FLAG_LABEL={korea:'Korea 🇰🇷',japan:'Japan 🇯🇵',china:'China 🇨🇳',thailand:'Thailand 🇹🇭',india:'India 🇮🇳',srilanka:'Sri Lanka 🇱🇰'};
 // ROUND flag roundels — exact replica of the menu's Korea taegeuk: Ø≈6.7pt, centre 4.6pt above baseline
 const FR=3.35, FCY=4.6, FD=2*FR;
 function _re(x,y,w,h){ return jFmt(x)+' '+jFmt(y)+' '+jFmt(w)+' '+jFmt(h)+' re'; }
@@ -815,13 +818,6 @@ function flagBody(c){
   s+='0.42 0.4 0.36 RG\n0.35 w\n'+_circ(CX,CY,FR)+'\nS\n';   // round border
   return s;
 }
-function flagGroup(country, x, baseline, page){
-  if(!country) return '';
-  const sz=PAGES[page]||[595.276,841.89];
-  return '\nq\n0 '+jFmt(sz[1])+' '+jFmt(sz[0])+' '+jFmt(-sz[1])+' re\nW n\nq 1 0 0 1 '+jFmt(x)+' '+jFmt(baseline)+' cm\n'+flagBody(country)+'Q\nQ\n';
-}
-// total horizontal advance of an allergen set (to place the flag after the cluster)
-function allerWidth(al){ const C=AC,geo=C.marker_geo||{}; let w=0; for(const m of (C.marker_order||[])){ if(al.indexOf(m)>=0 && ICONS && ICONS[m]) w+=(geo[m]&&geo[m].adv)||8; } return w; }
 function addItemHeight(it,sec){ // total vertical space this item needs (name + desc lines)
   const dl=wrapDesc((it.desc||'').toUpperCase(), descWidthFor(sec), 2).lines.filter(Boolean).length;
   return Math.max(sec.slot, 24 + (dl-1)*Math.abs(AC.desc_leading*AC.desc_size));
@@ -968,7 +964,6 @@ async function regenerate(){
       const bx=(f.marker_bx!=null)?f.marker_bx:(f.x+(f.display||'').length*ADV.name*f.size+(AC.marker_gap||7));
       markerAddStr += markerGroup(desired, bx, f.y + d, p);
     }
-    // (cuisine-origin flags removed — to be redesigned)
     for(const sp of allerDelSpans) ops.push({s:sp[0],e:sp[1],rep:enc(keepFont(sp,p))});
     if(allerDelSpans.length){
       ops = ops.filter(o=> !allerDelSpans.some(sp=> sp[0]<=o.s && o.e<=sp[1] && !(o.s===sp[0]&&o.e===sp[1])) );
@@ -1150,7 +1145,9 @@ function renderAddZone(ed){
     +'<label><input type="checkbox" class="af-a" value="dairy"> Dairy</label>'
     +'<label><input type="checkbox" class="af-a" value="gluten"> Gluten</label>'
     +'<label><input type="checkbox" class="af-a" value="sesame"> Sesame</label>'
-    +'<label><input type="checkbox" class="af-a" value="jain"> Jain</label></div>'
+    +'<label><input type="checkbox" class="af-a" value="jain"> Jain</label>'
+    +'<label><input type="checkbox" class="af-a" value="korea"> Korea</label>'
+    +'<label><input type="checkbox" class="af-a" value="new"> NEW badge</label></div>'
     +'<div class="afbtns"><button class="afadd">Add to menu</button><button class="afcancel">Cancel</button></div>';
   btn.onclick=()=>{ form.classList.toggle('open'); if(form.classList.contains('open')) form.querySelector('.af-name').focus(); };
   zone.append(btn,form); ed.appendChild(zone);
@@ -1269,7 +1266,7 @@ function buildEditor(){
     }
     { // allergen marker toggles
       const mrow=document.createElement('div'); mrow.className='metarow'; mrow.style.alignItems='center';
-      const mlbl=document.createElement('span'); mlbl.className='lbl'; mlbl.textContent='Allergens';
+      const mlbl=document.createElement('span'); mlbl.className='lbl'; mlbl.textContent='Markers';
       const mwrap=document.createElement('span'); mwrap.className='afchk'; mwrap.style.cssText='gap:13px;margin-top:0';
       const orig=it.name.allergens||[];
       for(const m of (BRAND.markers||['dairy','gluten','sesame','jain'])){
@@ -1285,7 +1282,7 @@ function buildEditor(){
           else allerEdits[it.name.id]=arr;
           schedulePreview();
         };
-        lab.appendChild(cb); lab.insertAdjacentHTML('beforeend', (window.ALLERGEN_ICONS&&window.ALLERGEN_ICONS[m])||''); lab.appendChild(document.createTextNode(' '+m[0].toUpperCase()+m.slice(1)));
+        lab.appendChild(cb); lab.insertAdjacentHTML('beforeend', (window.ALLERGEN_ICONS&&window.ALLERGEN_ICONS[m])||''); lab.appendChild(document.createTextNode(' '+(m==='new'?'NEW':m[0].toUpperCase()+m.slice(1))));
         mwrap.appendChild(lab);
       }
       mrow.appendChild(mlbl); mrow.appendChild(mwrap); card.appendChild(mrow);
@@ -1627,7 +1624,9 @@ window.ALLERGEN_ICONS={
  dairy:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M9 3h6M9.5 3v2.2L8 8.2V20a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1V8.2l-1.5-3V3"/><path d="M8 11h8"/></svg>',
  gluten:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M12 21V8M12 8c0-2 1.5-4 4-4 0 2.2-1.8 4-4 4Zm0 0c0-2-1.5-4-4-4 0 2.2 1.8 4 4 4Zm0 4c0-1.6 1.4-3 3.2-3 0 1.8-1.5 3-3.2 3Zm0 0c0-1.6-1.4-3-3.2-3 0 1.8 1.5 3 3.2 3Zm0 4c0-1.6 1.4-3 3.2-3 0 1.8-1.5 3-3.2 3Zm0 0c0-1.6-1.4-3-3.2-3 0 1.8 1.5 3 3.2 3Z"/></svg>',
  sesame:'<svg viewBox="0 0 24 24" fill="currentColor" stroke="none"><ellipse cx="8" cy="9" rx="1.5" ry="2.4" transform="rotate(-20 8 9)"/><ellipse cx="14" cy="8" rx="1.5" ry="2.4" transform="rotate(18 14 8)"/><ellipse cx="11" cy="13" rx="1.5" ry="2.4" transform="rotate(-8 11 13)"/><ellipse cx="16" cy="14" rx="1.5" ry="2.4" transform="rotate(24 16 14)"/><ellipse cx="7" cy="15" rx="1.5" ry="2.4" transform="rotate(12 7 15)"/></svg>',
- jain:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M14 5v9a4 4 0 1 1-4-4"/></svg>'};
+ jain:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M14 5v9a4 4 0 1 1-4-4"/></svg>',
+ korea:'<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M12 3a9 9 0 0 1 0 18 4.5 4.5 0 0 1 0-9 4.5 4.5 0 0 0 0-9Z" fill="currentColor"/></svg>',
+ new:'<svg viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M12 2l2.4 6.6 7 .3-5.5 4.4 2 6.8-5.9-4-5.9 4 2-6.8-5.5-4.4 7-.3Z"/></svg>'};
 function syncRail(){
   const rail=document.getElementById('rail'); if(!rail) return;
   rail.querySelectorAll('.sec').forEach(e=>e.remove());
