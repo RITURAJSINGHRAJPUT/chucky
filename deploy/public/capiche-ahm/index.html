@@ -847,7 +847,7 @@ async function regenerate(){
     // keepState is computed over the MERGED range, never per original span: merged spans can nest
     // (removing MANGO PICANTE + MELON FRESCA nests [8859,8909] inside [7602,8911]), and per-span
     // replacement would emit overlapping ops -- exactly the corruption mergeSpans exists to prevent.
-    for(const d of mergeSpans(delSpans)) ops.push({s:d[0],e:d[1],rep:enc(keepState(PT.slice(d[0],d[1])))});
+    for(const d of mergeSpans(delSpans)) ops.push({s:d[0],e:d[1],rep:enc(keepState(PT.slice(0,d[1])))});
     // Volumes we re-place ourselves must be hidden from reflowOps: it rewrites every Tm it sees,
     // and two ops covering one byte range would corrupt the stream in spliceBytes. We apply the
     // reflow shift to them by hand instead (see the volume block below).
@@ -931,7 +931,7 @@ async function regenerate(){
         const va=(FM.allowed&&FM.allowed.desc)||'';
         const vfits=!!vtxt&&[...vtxt].every(c=>va.indexOf(c)>=0);
         if(vfits) ops.push({s:it.vol_span[0],e:it.vol_span[1],rep:enc('5 0 0 5 '+num(vp.x)+' '+num(vp.y+sh)+' Tm\n('+escPdf(vtxt)+')Tj')});
-        else { ops.push({s:it.vol_span[0],e:it.vol_span[1],rep:enc(keepState(PT.slice(it.vol_span[0],it.vol_span[1])))});
+        else { ops.push({s:it.vol_span[0],e:it.vol_span[1],rep:enc(keepState(PT.slice(0,it.vol_span[1])))});
                if(vtxt) append+=volStamp({x:vp.x,y:vp.y+sh,size:it.vol_pos.size},origIt.vol_color||it.vol_color,vtxt); }
       }
       if(it.price_span){ const pv=val(mp,origIdx,'price',origIt.price);

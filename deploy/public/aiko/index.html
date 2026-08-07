@@ -405,7 +405,11 @@ function keepState(seg){
 function keepFont(sp, p){
   // generalised: colour / Tc / Tw / gs are inherited by later blocks exactly as fonts are,
   // and dropping them re-colours or re-spaces the rest of the page (see keepState above)
-  return keepState(pageText(p).slice(sp[0],sp[1]));
+    // The walk must start at byte 0, not at sp[0]: keepState tracks q/Q depth RELATIVE to where
+  // it begins, so a span starting mid-nesting makes it mistake state that a later `Q` will
+  // restore for live top-level state, and re-emitting that repaints the rest of the page
+  // (a deleted NEW badge left its own white fill behind, blanking every dish below it).
+  return keepState(pageText(p).slice(0,sp[1]));
 }
 
 const _divs={};
@@ -589,10 +593,22 @@ function structuralForPage(p, pristine){
       : (i<ny.length-1? ny[i]-ny[i+1] : (i>0? ny[i-1]-ny[i]:0));
     // owner of a y: the nearest name that actually CLAIMS it (see _ownsRun); -1 means page chrome
     const owner=y=>{ const j=cidx(y); return _ownsRun(ny[j],y,slotH(j))? j : -1; };
-    // only removals in the SAME section push a dish down-list
-    // only removals in the SAME section push a dish up its own stack
+    // A section that shrinks must also close its own gap for every section stacked BELOW it in the
+    // same column (e.g. removing a SIDES dish should also lift MAINS' heading and dishes), not just
+    // reflow inside itself. This is safe now because slotH is section-correct (uses gap_below for a
+    // section's last row) -- unlike the old column-wide clustering this replaced, it can't borrow
+    // height from the wrong section. dividerOps/appendedForPage already cascade this way; this brings
+    // the text/header anchor path in line with them.
+    const _secOrder=[]; _rowSec.forEach(s=>{ if(s!=null&&_secOrder.indexOf(s)<0) _secOrder.push(s); });
+    const _secShrink={};
+    for(const k of remSet){ const s=_rowSec[k]; if(s==null) continue; _secShrink[s]=(_secShrink[s]||0)+slotH(k); }
+    const _secOffset={}; let _running=0;
+    for(const s of _secOrder){ _secOffset[s]=_running; _running+=(_secShrink[s]||0); }
+    // removals in the SAME section push a dish up its own stack; removals in an EARLIER section
+    // (same column) push the whole section up via _secOffset
     const shiftFor=j=>{ let d=0;
       for(const k of remSet){ if(k<j && _rowSec[k]!=null && _rowSec[k]===_rowSec[j]) d+=slotH(k); }
+      d+=_secOffset[_rowSec[j]]||0;
       return d; };
     // DELETE per RUN, not per block: only the text runs the removed dish actually owns. The block's
     // BT/rg/Tf prologue and any inter-run Tc/Tw survive, so nothing downstream is re-coloured.

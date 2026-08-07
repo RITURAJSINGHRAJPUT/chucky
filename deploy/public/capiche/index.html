@@ -360,6 +360,12 @@ function descTm(f){            // the block's Tm (so we can swap the size)
   f._tm=last?{s:st+last.index,e:st+last.index+last[0].length,size:parseFloat(last[1]),x:parseFloat(last[3]),y:parseFloat(last[4])}:null;
   return f._tm;
 }
+function mergeSpans(list){
+  const s=list.slice().sort((a,b)=>a[0]-b[0]||a[1]-b[1]), out=[];
+  for(const sp of s){ const last=out[out.length-1];
+    if(last && sp[0]<=last[1]) last[1]=Math.max(last[1],sp[1]); else out.push([sp[0],sp[1]]); }
+  return out;
+}
 /* ---- STATE-PRESERVING DELETE ----------------------------------------------------------------
    Deleting a byte span can strip graphics/text state that LATER, UN-DELETED content inherits.
    The food editors hit this with fonts (see keepFont() in capiche/index.html + the knowledge doc
@@ -431,7 +437,11 @@ function keepState(seg){
 function keepFont(sp, p){
   // generalised: colour / Tc / Tw / gs are inherited by later blocks exactly as fonts are,
   // and dropping them re-colours or re-spaces the rest of the page (see keepState above)
-  return keepState(pageText(p).slice(sp[0],sp[1]));
+    // The walk must start at byte 0, not at sp[0]: keepState tracks q/Q depth RELATIVE to where
+  // it begins, so a span starting mid-nesting makes it mistake state that a later `Q` will
+  // restore for live top-level state, and re-emitting that repaints the rest of the page
+  // (a deleted NEW badge left its own white fill behind, blanking every dish below it).
+  return keepState(pageText(p).slice(0,sp[1]));
 }
 
 const _divs={};
@@ -514,6 +524,48 @@ function _blocks(b){const T=_toks(b),B=[],nb=[];let dep=0,qs=-1,qa=null,bs=-1,ba
     else if(op==='ET'){if(bs>=0){B.push({span:[bs,k.e],kind:'text',x:ba?ba[0]:null,y:ba?ba[1]:null});bs=-1;}}
     nb.length=0;}
   return B;}
+/* ---- TEXT RUNS ------------------------------------------------------------------------------
+   Illustrator does NOT put one dish per BT..ET. It bundles section headings, the page legend, the
+   intro blurb and OTHER dishes' "NPCS" superscripts inside a neighbouring dish's block — e.g. the
+   Sushi heading's "8pcs" is drawn at y=364 inside CORN TEMPURA's block, whose own name is at y=102.
+   And _blocks() records only ONE position per block, taken from its LAST Tm. So a block is the
+   wrong unit for both delete and reflow; the right unit is a single Tm-positioned run.
+   A run spans from its Tm's first operand to the end of its last text-showing operator. State ops
+   BETWEEN runs (Tc/Tw/Tf/rg) therefore belong to no run and can never be deleted — which is also
+   what stops a delete from re-colouring the rest of the page. */
+function _textRuns(b){
+  const T=_toks(b), R=[], nb=[]; let inBT=false, cur=null;
+  const close=()=>{ if(cur){ if(cur.draw>cur.span[0]){ cur.span[1]=cur.draw; R.push(cur); } cur=null; } };
+  for(const k of T){
+    if(k.t===0){nb.push(k);continue;}
+    if(k.t===1){ if(cur) cur.draw=-1; nb.length=0; continue; }   // string: the operator decides
+    if(k.t===2){nb.length=0;continue;}
+    const op=_dec(b,k);
+    if(op==='BT'){ close(); inBT=true; }
+    else if(op==='ET'){ close(); inBT=false; }
+    else if(op==='Tm'&&inBT){
+      const a=nb.slice(-6).map(x=>_nv(b,x));
+      if(a.length===6&&nb.length>=6){ close(); cur={span:[nb[nb.length-6].s,k.e],x:a[4],y:a[5],draw:0}; }
+    }
+    else if(cur&&(op==='Tj'||op==='TJ'||op==="'"||op==='"')) cur.draw=k.e;
+    nb.length=0;
+  }
+  close();
+  return R;
+}
+/* Does a run at `ry` belong to the dish whose name baseline is `ny`? Dish content sits AT or BELOW
+   its name (description, grams, price) and at most ~12pt above it (raised "6PCS" superscripts).
+   Section headings sit ~25pt ABOVE their section's first name and the page legend a full row BELOW
+   the last one, so both fall outside and are treated as chrome: never deleted, never shifted.
+   Measured on aiko p0 — headings 24.1-33.3 above, "8pcs" 29.9 above, legend 49.7 below, while real
+   dish content is 0-12 either way plus grams up to 26.8 BELOW. */
+function _ownsRun(ny, ry, slotH){ const d=ny-ry; return d>=-12 && d<=Math.max(slotH,20)-2; }
+/* Allergen/marker artwork (q..Q, positioned by `cm`) always sits slightly ABOVE its own dish's
+   name — never below it. _ownsRun's downward reach is a whole slot, which overlaps the NEXT dish's
+   raised artwork (at ny-slot+5.8) and would let a dish claim its neighbour's icons: reordering
+   BURNT GARLIC RICE dragged MUSHROOM TRUFFLE's icon along with it, and removal had the same latent
+   bug. Artwork therefore gets its own tight window. */
+function _ownsArt(ny, ry){ const d=ny-ry; return d>=-12 && d<=0.5; }
 function _cluster(blocks,cmin,cmax,gap){gap=gap||18;
   const bs=blocks.filter(b=>b.x!==null&&b.x>=cmin&&b.x<=cmax&&b.y!==null).sort((a,b)=>b.y-a.y);
   const cl=[];let cur=[];for(const b of bs){if(!cur.length)cur=[b];else if(cur[cur.length-1].y-b.y<=gap)cur.push(b);else{cl.push(cur);cur=[b];}}
@@ -529,7 +581,7 @@ let _structCache={sig:null,byPage:{}};
 function structuralForPage(p, pristine){
   const removedHere=FM.fields.filter(f=>f.page===p&&f.role==='name'&&removed.has(f.id));
   if(!removedHere.length) return {deletes:[],shiftOps:[],priceShift:{},skip:new Set()};
-  const blocks=_blocks(pristine), anchors=_anchors(pristine);
+  const blocks=_blocks(pristine), anchors=_anchors(pristine), runs=_textRuns(pristine);
   const cols=pageColumns(p);
   const priceTm=FM.fields.filter(f=>f.page===p&&f.role==='price');
   const deletes=[], shiftOps=[], priceShift={}, removedSlots=[]; const skip=new Set();
@@ -537,24 +589,75 @@ function structuralForPage(p, pristine){
     const removedYs=removedHere.filter(f=>f.x>=col.min&&f.x<col.max).map(f=>f.y);
     if(!removedYs.length) continue;
     const colNameYs=FM.fields.filter(f=>f.page===p&&f.role==='name'&&f.x>=col.min&&f.x<col.max).map(f=>f.y);
-    const cl=_cluster(blocks,col.min,col.max);
-    const top=c=>Math.max(...c.map(b=>b.y));
-    const cidx=y=>{let bi=0,bd=1e9;cl.forEach((c,i)=>{const d=Math.min(...c.map(b=>Math.abs(b.y-y)));if(d<bd){bd=d;bi=i;}});return bi;};
-    const li=cidx(Math.min(...colNameYs));
+    // NAME-ANCHORED rows, and per-RUN ownership. Block-level clustering bundled the section
+    // headings into a neighbouring dish's block: removing MARGHERITA DELETED the "STAPLES" heading
+    // and shifted "SPECIALS" by 53.86pt. A run judged on its own y cannot do that.
+    const ny=[...colNameYs].sort((a,b)=>b-a);
+    const cidx=y=>{ let bi=0,bd=1e9; ny.forEach((yy,i)=>{const d=Math.abs(yy-y); if(d<bd){bd=d;bi=i;}}); return bi; };
+    const top=i=>ny[i];
     const remSet=new Set(removedYs.map(cidx));
-    const slotH=i=> i<cl.length-1? top(cl[i])-top(cl[i+1]) : (i>0? top(cl[i-1])-top(cl[i]):0);
-    for(let j=0;j<cl.length;j++){
-      if(remSet.has(j)){ for(const b of cl[j]) deletes.push(b.span); removedSlots.push({cmin:col.min,cmax:col.max,y:top(cl[j]),h:slotH(j)}); continue; }
-      if(j>li) continue;
-      let d=0; for(const k of remSet){ if(k<j) d+=slotH(k); }
+    // Each row's dish id and SECTION, so a removal only reflows its own section. Capiche puts two
+    // sections in one column (PIZZAS+PIZZA SPECIALS on p0; SIDES+SALADS, PASTAS+PASTA SPECIALS,
+    // DESSERTS+DESSERT SPECIALS on p1), so a column-wide slot measures into the next section.
+    const _nav=((FM&&FM.nav_sections)||[]).filter(s=>s.page===p);
+    const _secAt=(x,y)=>{ let best=null,bg=Infinity,ba=null,bag=Infinity;
+      for(const s of _nav){ const dx=Math.abs(s.x-x), gap=s.y-y; if(gap<-6) continue;
+        if(gap<bag){bag=gap;ba=s;} if(dx<=140&&gap<bg){bg=gap;best=s;} }
+      return (best||ba||{}).label||null; };
+    const _rowSec=ny.map(yy=>{ const f=FM.fields.find(q=>q.page===p&&q.role==='name'&&Math.abs(q.y-yy)<0.01&&q.x>=col.min&&q.x<col.max);
+      return f? _secAt(f.x,f.y) : null; });
+    // a row's own height: to the next name IN THE SAME SECTION, else the previous gap
+    const slotH=i=>{ for(let k=i+1;k<ny.length;k++) if(_rowSec[k]===_rowSec[i]) return ny[i]-ny[k];
+      for(let k=i-1;k>=0;k--) if(_rowSec[k]===_rowSec[i]) return ny[k]-ny[i];
+      return i<ny.length-1? ny[i]-ny[i+1] : 0; };
+    const owner=y=>{ const j=cidx(y); return _ownsRun(ny[j],y,slotH(j))? j : -1; };
+    // A section that shrinks must also close its own gap for every section stacked BELOW it in the
+    // same column -- unlike the old column-wide clustering, slotH is section-correct now, so
+    // cascading a section's total shrinkage downward can't borrow height from the wrong section.
+    const _secOrder=[]; _rowSec.forEach(s=>{ if(s!=null&&_secOrder.indexOf(s)<0) _secOrder.push(s); });
+    const _secShrink={};
+    for(const k of remSet){ const s=_rowSec[k]; if(s==null) continue; _secShrink[s]=(_secShrink[s]||0)+slotH(k); }
+    const _secOffset={}; let _running=0;
+    for(const s of _secOrder){ _secOffset[s]=_running; _running+=(_secShrink[s]||0); }
+    const shiftFor=j=>{ let d=0;
+      for(const k of remSet){ if(k<j && _rowSec[k]!=null && _rowSec[k]===_rowSec[j]) d+=slotH(k); }
+      d+=_secOffset[_rowSec[j]]||0;
+      return d; };
+    // DELETE per run: only what the removed dish itself owns. The block's BT/colour/Tf prologue and
+    // any inter-run Tc/Tw survive, so nothing downstream is re-coloured or re-spaced.
+    for(const r of runs){
+      if(r.x<col.min||r.x>col.max) continue;
+      const j=owner(r.y);
+      if(j>=0&&remSet.has(j)) deletes.push(r.span);
+    }
+    // self-contained q..Q artwork sits just ABOVE its own dish's name -> tighter window.
+    // KNOWN GAP: a few removals leave an allergen-icon group behind, floating over whatever
+    // reflowed up into the slot. Confirmed by render on CHILLI BUTTER CORN (0:26, 2 icons); a
+    // shift-invariant count over all 37 single-dish removals also flags CHOCOLATE CRUNCH CAKE
+    // (1:12, 1 short) and CARAMELISED ONION PASTA (1:45, 3 short). NOT a cidx() mis-attribution --
+    // scanning every row for the true _ownsArt owner instead changes nothing -- so those icons are
+    // not reaching this loop as `kind:'q'` blocks carrying an x/y at all. Needs _blocks() work.
+    for(const b of blocks){
+      if(b.kind!=='q'||b.x===null||b.y===null||b.x<col.min||b.x>col.max) continue;
+      const j=cidx(b.y);
+      if(_ownsArt(ny[j],b.y)&&remSet.has(j)) deletes.push(b.span);
+    }
+    for(const j of remSet) removedSlots.push({cmin:col.min,cmax:col.max,y:top(j),h:slotH(j)});
+    // SHIFT per anchor, judged on its OWN y -- NOT on ownership. Chrome (section headings) must
+    // still reflow with the column: a heading below a shrunk section has to rise with it, or the
+    // next section's content lands on top of it. Page furniture below the last dish's own slot
+    // (e.g. a legend) is the one exception and stays anchored to the page.
+    const flowBottom = ny.length? ny[ny.length-1]-slotH(ny.length-1) : 0;
+    for(const a of anchors){
+      if(a.x===null||a.y===null||a.x<col.min||a.x>col.max) continue;
+      if(a.y<flowBottom) continue;                       // page furniture, not in the dish flow
+      const j=cidx(a.y);                                 // positional: chrome reflows too
+      if(remSet.has(j)&&owner(a.y)>=0) continue;         // being deleted with its own dish
+      const d=shiftFor(j);
       if(d<=0) continue;
-      for(const blk of cl[j]) for(const a of anchors){
-        if(!(blk.span[0]<=a.s&&a.e<=blk.span[1])) continue;
-        // if this Tm is a price Tm, defer to price handling (compose with right-align)
-        const pf=priceTm.find(pf=>a.s>=pf.tm_span[0]&&a.e<=pf.tm_span[1]);
-        if(pf){ priceShift[pf.id]=d; }
-        else shiftOps.push({s:a.s,e:a.e,rep:enc(fmtNum(a.y+d))});
-      }
+      const pf=priceTm.find(pf=>a.s>=pf.tm_span[0]&&a.e<=pf.tm_span[1]);
+      if(pf){ priceShift[pf.id]=(priceShift[pf.id]||0)+d; }
+      else shiftOps.push({s:a.s,e:a.e,rep:enc(fmtNum(a.y+d))});
     }
   }
   // mark removed items' field ids to skip in text edits
@@ -787,8 +890,15 @@ function badgeOps(bytes, page, removedSlots){
     const owner=badgeOwner(b,page);
     if(owner&&(owner.id in markerEdits)&&!removed.has(owner.id)) continue;   // marker engine owns this dish's badge
     if(owner&&removed.has(owner.id)){ // _badges() extends this span BACKWARDS past the q to swallow
-        // an un-nested `0 0.988 1 0 k`; dropping it turns later headings (APPETIZERS) grey
-        ops.push({s:b.span[0],e:b.span[1],rep:enc(keepState(pageText(p).slice(b.span[0],b.span[1])))}); continue; }   // removed item -> delete its badge
+        // an un-nested `0 0.988 1 0 k`; dropping it turns later headings (APPETIZERS) grey.
+        // ...but keep the state from the span's START, not its END. The badge is a self-contained
+        // decoration: the artwork wraps it in its own `q .. Q` (the stream reads `f Q Q` at the
+        // end), so its net effect on the enclosing state is nil. Its internal `0 0 0 0 k` — white,
+        // for the NEW letters — is only ever contained by that wrapper, which this delete removes
+        // along with everything else. Replaying the END state therefore leaked white to top level
+        // and painted every dish below it invisible. The START state is what the surviving `Q`
+        // would have restored, so it is right whether or not the wrapper survives.
+        ops.push({s:b.span[0],e:b.span[1],rep:enc(keepState(s.slice(0,b.span[0])))}); continue; }   // removed item -> delete its badge
     let shift=0;   // survivor below a removed slot -> ride up by the removed height (same as dividers)
     for(const rs of (removedSlots||[])){ if(b.x>=rs.cmin&&b.x<rs.cmax&&b.y<=rs.y-Math.abs(rs.h)/2) shift+=Math.abs(rs.h); }
     if(shift>0){ const txt=s.slice(b.span[0],b.span[1]).replace(/(1 0 0 1 -?[\d.]+ )(-?[\d.]+)( cm)/g,(mm,a,y,c)=>a+fmtNum(parseFloat(y)+shift)+c); ops.push({s:b.span[0],e:b.span[1],rep:enc(txt)}); }
@@ -832,6 +942,13 @@ async function regenerate(){
       for(const v of inside){ if(v[0]>cur) dels.push([cur,v[0]]); cur=v[1]; }
       if(cur<d[1]) dels.push([cur,d[1]]);
     }
+    // Merge before emitting. Deleting per TEXT RUN (rather than per BT..ET block) produces many
+    // more spans, and adjacent runs' spans touch or nest -- spliceBytes assumes non-overlapping ops
+    // and runs its cursor backwards if it ever meets an overlap. Worse, the nested span's own
+    // keepFont op was being filtered out by the enclosing one below, so the state it was meant to
+    // preserve vanished and survivors inherited an older fill (dish black -> chrome black).
+    // keepFont is therefore computed over the MERGED range, never per original span.
+    dels = mergeSpans(dels);
     for(const d of dels) ops.push({s:d[0],e:d[1],rep:enc(keepFont(d,p))});
     if(dels.length){
       ops = ops.filter(o=> !dels.some(d=> d[0]<=o.s && o.e<=d[1] && !(o.s===d[0]&&o.e===d[1])) );
