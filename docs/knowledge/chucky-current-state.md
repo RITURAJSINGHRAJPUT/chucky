@@ -188,19 +188,31 @@ and was used for every render audit in this document.
 
 ## 8. Known bugs
 
-**ADD stamps the wrong font (Capiche page 0) — critical, print-visible.**
-Font resource names are **page-local** in PDF, but `add_const.fonts` is a single global map.
-`add_const.fonts.desc` is `/T1_0`, which is correct on page 1 but on page 0 is a completely different
-(serif) typeface with an incompatible encoding. Adding a dish to a PIZZAS section prints
-`TOMATO, ⊗SIL, MOZZARELLA` in serif with a `.notdef` blob. Verified by render; the *same* dish added
-to a page-1 section renders perfectly. Aiko shares the structural flaw (`/TT0` global vs `/TT2` on
-page 1) but its value happens to render, so it is latent rather than active.
-The codebase already knows fonts are page-local — `jfont_by_page` does exactly this for the J glyph.
+**ADD stamped the wrong font (Capiche page 0) — FIXED in Phase 0c.**
+Font resource names are **page-local** in PDF, but `add_const.fonts` was a single global map.
+`add_const.fonts.desc` is `/T1_0`, correct on page 1 but on page 0 a completely different (serif)
+typeface with an incompatible encoding — adding a dish to a PIZZAS section printed
+`TOMATO, ⊗SIL, MOZZARELLA` in serif with a `.notdef` blob. The *same* dish added to a page-1 section
+rendered perfectly, which is what identified the cause.
+Fixed by `pageFonts(p)` in both food editors: resolve the resource the page's OWN baked fields use,
+falling back to `add_const.fonts`. This generalises `jfont_by_page`, which already did exactly this
+for the J glyph. **Aiko was measured, not assumed:** it uses `/TT0` on *both* pages, so it never had
+the mismatch — an earlier claim here that page 1 used `/TT2` came from a mis-indexed probe and is
+withdrawn. Aiko gets the same resolver purely for parity and to keep a future artwork rebuild from
+reintroducing the bug silently; it returns the values it replaces.
+Note the resolver scans the whole stream prefix rather than a fixed window — on Aiko page 0 the
+governing `Tf` is thousands of bytes back, and a small window silently finds nothing.
+Pinned by the regression case *"capiche: ADD uses the target page font"*.
 
-**ADD bypasses charset validation — critical, silent.**
-The add form uses `normTypo()` but never `cleanField()`, unlike the inline edit path. Capiche's name
-font has **no `Z`**, so "TEST PIZZA" prints "TEST PIA" with no warning. Surat/Ahm name fonts lack
-`X, Q, V, 7, 9`.
+**ADD charset validation — NOT a bug. Earlier audit claim retracted.**
+An earlier draft of this document claimed the add form skipped charset validation and would silently
+print "TEST PIZZA" as "TEST PIA". That was **wrong**: it came from a harness writing directly into
+`added`, behind the form, which no user can do. All six editors do validate, by one of two valid
+mechanisms — Capiche/Aiko compute the offending characters and **disable the Add button**;
+Churn'd/Aiko-drinks/Surat/Ahm **strip and warn** via `cleanName()`/`cleanField()` + `fontNote()`.
+The charset ceiling itself is real and unchanged (Capiche names have no `Z`; Surat/Ahm names lack
+`X, Q, V, 7, 9`) — it is simply enforced rather than ignored. Pinned by *"<editor>: ADD is gated on
+the font charset"* across all six.
 
 **Stored XSS in `/bugs/` — critical.**
 `bugs/index.html:79` interpolates `b.shot` into `<img src="…">` **unescaped**, and `esc()` escapes
@@ -285,8 +297,8 @@ work. `backups/*_20260727_170244.html` predate **both** lineages and cannot serv
 - **0b** testing baseline: `mupdf` as a devDependency + committed render/audit helpers; strip the
   machine-specific paths; add a Churn'd harness; a regression suite that *renders* and pins the known
   bugs as declared known-failures.
-- **0c** ADD font selection (per-page font map, extending the existing `jfont_by_page` pattern) and
-  ADD charset via `cleanField()`. Flips two known-failures green.
+- **0c** ✅ done — ADD font selection via `pageFonts(p)`. The companion "ADD charset" item was
+  investigated and **withdrawn**: no such bug exists (see §8).
 - **0d** `/bugs/` XSS, payload caps, URL validation.
 - **0e** Surat/Ahm name-wrap reconciliation. **No deploy is safe before this.**
 

@@ -808,8 +808,8 @@ function flagBody(c){
 // Stamp a dish's marker set at its name-baseline anchor (bx0,Yb). Mirrors the baked packing:
 // absolute per-icon offsets from add_const, so a re-stamp lands exactly where the originals were.
 function stampMarkers(bx0, Yb, set, page){
-  const C=AC, F=C.fonts, IC=C.ink_color; let out='';
-  const jf=(FM.jfont_by_page&&FM.jfont_by_page[page])||F.j;   // AOMonoBold resource name differs per page
+  const C=AC, F=pageFonts(page), IC=C.ink_color; let out='';
+  const jf=F.j;   // AOMonoBold resource name differs per page (pageFonts folds in jfont_by_page)
   const OFF={dairy:C.icon_dairy,gluten:C.icon_gluten,jain:C.icon_j,spicy:C.icon_spicy,korea:C.icon_korea,new:C.icon_badge};
   const spDx = set.has('jain') ? 17.79 : 12.0;   // flame packs after J when Jain present, else tighter (matches baked)
   for(const t of MARKER_TYPES){
@@ -823,13 +823,43 @@ function stampMarkers(bx0, Yb, set, page){
   }
   return out;
 }
+/* ---- PER-PAGE FONT RESOURCES ----------------------------------------------------------------
+   Font resource names (/T1_0, /TT2 …) are PAGE-LOCAL in PDF: the same name means different fonts on
+   different pages. `add_const.fonts` is a single global map, so an added dish was stamped with page
+   1's names wherever it landed. On page 0 that made `/T1_0` — a serif face with an incompatible
+   encoding — render the description as "TOMATO, <notdef>SIL, MOZZARELLA" instead of "TOMATO, BASIL,
+   MOZZARELLA". The bytes were valid; only the glyphs were wrong, which is why no byte-level test
+   caught it.
+   The codebase already knew this for one glyph — `FM.jfont_by_page` exists for exactly this reason —
+   so this generalises that idea to name/desc/price by reading the resource the page's OWN baked
+   fields use. Falls back to add_const.fonts when a page has no baked field of that role. */
+const _pgFonts={};
+function pageFonts(p){
+  if(_pgFonts[p]) return _pgFonts[p];
+  const F=AC.fonts, out={name:F.name, desc:F.desc, price:F.price, j:F.j};
+  const t=pageText(p);
+  const firstOff=f=> f.lines ? (f.lines[0]&&f.lines[0][0]&&f.lines[0][0][0])
+                  : f.line_spans ? (f.line_spans[0]&&f.line_spans[0][0])
+                  : (f.tj_span&&f.tj_span[0]);
+  for(const role of ['name','desc','price']){
+    const f=FM.fields.find(q=>q.page===p&&q.role===role);
+    const off=f&&firstOff(f); if(off==null) continue;
+    // scan the WHOLE prefix, not a fixed window: Illustrator sets a font once and draws a long run
+    // under it, so on some pages the nearest `Tf` is thousands of bytes back (a 400-byte window
+    // finds nothing there and silently falls back to the wrong global).
+    const m=(t.slice(0,off).match(/\/[A-Za-z0-9_]+ 1 Tf/g)||[]).pop();
+    if(m) out[role]=m.replace(/ 1 Tf$/,'');
+  }
+  out.j=(FM.jfont_by_page&&FM.jfont_by_page[p])||out.j;
+  return _pgFonts[p]=out;
+}
 function addItemHeight(it,sec){ // total vertical space this item needs (name + desc lines)
   const dl=wrapDesc((it.desc||'').toUpperCase(), 56, 2).lines.filter(Boolean).length;
   return Math.max(sec.slot, 24 + (dl-1)*9.0);
 }
 function buildItemJS(it, sec, Y){
   const NX=sec.col_x, SZ=sec.name_size||13, adv=0.63*SZ;   // exact AO-Mono advance (630/1000 em)
-  const C=AC, F=C.fonts, NC=C.name_color, IC=C.ink_color;
+  const C=AC, F=pageFonts(sec.page), NC=C.name_color, IC=C.ink_color;   // page-local resources, NOT the global map
   const DDY=(sec.desc_dy!=null?sec.desc_dy:C.desc_dy);
   const nm=(it.name||'').toUpperCase();
   let p=[];

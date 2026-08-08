@@ -904,8 +904,34 @@ function addItemHeight(it,sec){ // total vertical space this item needs (name + 
   const dl=wrapDesc((it.desc||'').toUpperCase(), descWidthFor(sec), 2).lines.filter(Boolean).length;
   return Math.max(sec.slot, 24 + (dl-1)*Math.abs(AC.desc_leading*AC.desc_size));
 }
+/* ---- PER-PAGE FONT RESOURCES ----------------------------------------------------------------
+   Font resource names (/TT0, /TT2 …) are PAGE-LOCAL in PDF: the same name means a different font on
+   a different page. `add_const.fonts` is one global map. Aiko happens to use `/TT0` on BOTH pages
+   today, so this resolver returns the same values it replaces and changes nothing here right now.
+   It is carried for parity with Capiche — where that same global map corrupted page-0 adds outright
+   — and so that a future artwork rebuild introducing a second font resource cannot reintroduce the
+   bug silently. Resolve the resource the page's OWN baked fields use; fall back to add_const.fonts. */
+const _pgFonts={};
+function pageFonts(p){
+  if(_pgFonts[p]) return _pgFonts[p];
+  const F=AC.fonts, out={name:F.name, desc:F.desc, price:F.price, grams:F.grams};
+  const t=pageText(p);
+  const firstOff=f=> f.lines ? (f.lines[0]&&f.lines[0][0]&&f.lines[0][0][0])
+                  : f.line_spans ? (f.line_spans[0]&&f.line_spans[0][0])
+                  : (f.tj_span&&f.tj_span[0]);
+  for(const role of ['name','desc','price','grams']){
+    const f=FM.fields.find(q=>q.page===p&&q.role===role);
+    const off=f&&firstOff(f); if(off==null) continue;
+    // scan the WHOLE prefix, not a fixed window: Illustrator sets a font once and draws a long run
+    // under it, so on page 0 the nearest `Tf` is thousands of bytes back and a small window finds
+    // nothing, silently falling back to the global map.
+    const m=(t.slice(0,off).match(/\/[A-Za-z0-9_]+ 1 Tf/g)||[]).pop();
+    if(m) out[role]=m.replace(/ 1 Tf$/,'');
+  }
+  return _pgFonts[p]=out;
+}
 function buildItemJS(it, sec, Y){
-  const C=AC, F=C.fonts, NC=C.name_color, IC=C.ink_color;
+  const C=AC, F=pageFonts(sec.page), NC=C.name_color, IC=C.ink_color;   // page-local resources, NOT the global map
   const NX=sec.col_x, SZ=sec.name_size||11, adv=C.adv_name*SZ;   // real Aiko mono advance (~0.587 em)
   const NTC=(C.name_tc!=null?C.name_tc:0);                       // names carry -0.024 tracking
   const DDY=(sec.desc_dy!=null?sec.desc_dy:C.desc_dy);

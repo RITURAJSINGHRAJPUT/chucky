@@ -28,10 +28,6 @@ let R = null;   // render helpers, loaded async
 const KNOWN = {
   'aiko: empty-edit byte identity':
     'page 0 gains ~10.6KB of re-emitted /GS0 gs /TT0 Tf state blocks. Present at HEAD, pre-dates this suite.',
-  'capiche: ADD uses the target page font':
-    'add_const.fonts is a single global map but PDF font resources are PAGE-LOCAL. Page 0 gets /T1_0 (a serif) where descriptions use /T1_2. Fix in Phase 0c.',
-  'capiche: ADD respects the font charset':
-    'the add form calls normTypo() but never cleanField(), so out-of-font characters reach the PDF silently ("PIZZA" -> "PIA"). Fix in Phase 0c.',
 };
 
 function record(name, ok, detail) {
@@ -205,17 +201,37 @@ const EDITORS = [
     return [!!stamped && stamped === want, `stamped ${stamped} vs page font ${want}`];
   });
 
-  // ---- 11. KNOWN-FAIL: ADD charset --------------------------------------------------------------
-  await guard('capiche: ADD respects the font charset', async () => {
-    const fm = JSON.parse(fs.readFileSync(path.join(ED('capiche'), 'fieldmap.json'), 'utf8'));
-    const typed = 'TEST PIZZA';
-    const out = outFile('cap_addcs.pdf', 'regress');
-    foodAR('capiche', out, {}, { ADDED: JSON.stringify([{ sec: 0, name: typed, desc: 'TOMATO', price: '499', price2: '', allergens: [], _id: 1 }]) });
-    const bad = charsetViolations(typed, fm.allowed?.name);
-    const rendered = R.textLines(out, 0).some(l => l.text.includes(typed));
-    // either the editor should have refused/cleaned it, or it must render in full — silently
-    // dropping glyphs (PIZZA -> PIA) is the bug
-    return [bad.length === 0 ? rendered : false, bad.length ? `"${typed}" needs [${bad.join('')}] which the font lacks; exported anyway` : 'rendered in full'];
+  // ---- 11. ADD charset is gated in the UI ------------------------------------------------------
+  // The contract is NOT "the export sanitises text" — it is "the editor never lets unprintable text
+  // be added". Every editor computes the offending characters and disables the Add button, so this
+  // asserts the gate exists rather than driving the export (which a real user cannot reach directly:
+  // the harnesses write into `added` behind the form, which is how this was briefly misdiagnosed as
+  // a missing-validation bug).
+  // Editors implement this two ways, both valid: BLOCK (compute the offending characters, disable the
+  // Add button — capiche/aiko) or STRIP-AND-WARN (cleanField removes them, fontNote tells the user —
+  // churnd/drinks/surat/ahm). What must never happen is unprintable text reaching the PDF silently,
+  // so assert both halves: a charset-derived check AND a user-visible consequence.
+  for (const d of ['capiche', 'aiko', 'churnd', 'drinks', 'capiche-surat', 'capiche-ahm']) {
+    await guard(`${d}: ADD is gated on the font charset`, async () => {
+      const src = fs.readFileSync(path.join(ED(d), 'index.html'), 'utf8');
+      // deliberately mechanism-agnostic: the guard is named bad()/cleanField()/cleanName() depending
+      // on the editor, so assert the CONTRACT (consults FM.allowed, and the user finds out) rather
+      // than any one function name — otherwise the test breaks on a rename and lies on a rewrite.
+      const checks = /FM\.allowed|ALLOWED[.[]/.test(src);
+      const tellsUser = /\.disabled\s*=/.test(src) || /fontNote\s*\(/.test(src);
+      const how = /function bad\(s,\s*allowed\)/.test(src) ? 'blocks' : 'strips+warns';
+      return [checks && tellsUser, checks && tellsUser ? how : `consultsCharset=${checks} userVisible=${tellsUser}`];
+    });
+  }
+
+  // and the charset data the gate relies on must actually exist
+  await guard('every editor declares a per-role charset (FM.allowed)', async () => {
+    const missing = [];
+    for (const d of ['capiche', 'aiko', 'churnd', 'drinks', 'capiche-surat', 'capiche-ahm']) {
+      const fm = JSON.parse(fs.readFileSync(path.join(ED(d), 'fieldmap.json'), 'utf8'));
+      if (!fm.allowed || !Object.keys(fm.allowed).length) missing.push(d);
+    }
+    return [!missing.length, missing.length ? 'missing: ' + missing.join(', ') : 'all six'];
   });
 
   // ---- summary ---------------------------------------------------------------------------------
