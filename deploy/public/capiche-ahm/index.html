@@ -519,60 +519,155 @@ function nameGeomOf(it, PT){                          // parse the baked name bl
   const tm = m? {s:bt+m.index, e:bt+m.index+m[0].length, txt:m[0], y:parseFloat(m[4])} : null;
   return it._ng={size, x0, topY:it.top_y, lead, tm};
 }
-/* ---- HOW FAR THE TEXT BLOCK MAY RISE --------------------------------------------------------
-   The block is bottom-anchored on the price's line and grows UPWARD, so the only budget that
-   matters is the clear space ABOVE the baked name.
-
-   This used to be measured as `pitch - content_h`, which is wrong: `content_h` is a SYNTHETIC
-   estimate the builder derives for add-slot maths, not a measured box —
-       reflow_data.py:109   content_h = nlines*15.6 + (dlines*9 + 6 if dlines else 0) + 10
-   It pads every row by a flat 10pt, adds another 6 for any description, and rounds both line
-   heights up (15.6 vs the real 15.54, 9 vs the real 8.4). On the AHM MANGO PICANTE row it claims
-   49.6pt of content inside a 66.1pt row — leaving 16.5pt — while the artwork really leaves 30.5pt
-   of clear space above the name ink. A second name line (15.54pt) therefore fit comfortably, but
-   was refused the moment the description had also grown, because both were spending the same
-   understated 16.5pt.
-
-   `photo_tile` is the row's TRUE box. reflow_data.py:138-144 derives `pitch` from the photo-strip
-   grid for exactly this reason ("the real row pitch is the PHOTO-STRIP GRID (uniform), not the
-   text-top delta"), and the divider rules are drawn on that grid — so the tile top IS the line the
-   text must not cross. Measure from there down to the baked name's ink top, keeping TOP_PAD clear
-   of the rule itself. Falls back to the old estimate when a row has no tile (added drinks). */
-const NAME_ASC=0.67;   // cap-height above the baseline as a fraction of font size, for this mono
-                       // family: measured 300.28 ink top vs 291.60 baseline at size 12.9512 on AHM
-                       // MANGO PICANTE (8.68/12.9512). The J mark uses the same family.
-const TOP_PAD=2;       // clearance left under the divider rule drawn at the tile top
-/* Ink standing ABOVE the name's first baseline. Usually the name's own cap height, but the marker
-   cluster and NEW badge ride that first line `raise` above its baseline (see editedNameAnchor), and
-   across these two menus `raise` runs 5.85-8.61pt -- so a J can sit ~4pt higher than the name it
-   labels. Reserve whichever is taller, or a row saturating its budget would push the J through the
-   divider. Reserved whenever mk_anchor exists, since markers can be switched on by the user. */
-function rowTopInk(it, PT){
-  const g=nameGeomOf(it,PT); let asc=NAME_ASC*g.size;
-  if(it.mk_anchor && it.top_y!=null){
-    const B=(it.name_spans||[]).length, lh=Math.abs(g.lead)*g.size;
-    const raise=it.mk_anchor[1]-(it.top_y-(B-1)*lh);
-    asc=Math.max(asc, raise + NAME_ASC*((FM.jmark&&FM.jmark.size)||g.size));
+/* The row budget below replaces an earlier local attempt that measured `pitch - content_h`.
+   That was wrong: content_h is a SYNTHETIC estimate the builder derives for add-slot maths
+   (reflow_data.py:109) -- a flat +10pt per row, +6 more for a description, both line heights
+   rounded up -- so on AHM MANGO PICANTE it claimed 49.6pt of content in a 66.1pt row while the
+   artwork really leaves 30.5pt clear above the name. `photo_tile` is the row TRUE box, which is
+   also where reflow_data.py:138-144 derives `pitch` from and where the divider rules are drawn. */
+/* ---- NAME FITTING (ported from production) ---------------------------------------------------
+   This subsystem shipped live on 2026-07-15 (ee8c6ef1) and never reached the repository, while the
+   repository grew its own answer to the same problem. Live's is adopted because it is production-
+   proven AND strictly richer: it wraps long names automatically instead of requiring the user to
+   type line breaks, reserves the marker cluster's width so a wrap cannot run under the icons, and
+   handles baked icons the fieldmap never captured. It already measured the row from `photo_tile`,
+   which is the same source of truth the local fix independently arrived at, so the two agree on
+   geometry and only differ in reach. The local `rowHeadroom`/`rowTopInk` pair is retired here.   */
+const NAME_ADV=0.6383;   // measured AO-Mono advance. 0.63 under-measures by ~1pt over 6 glyphs,
+                         // which pulled the marker cluster back INTO the last letter.
+const MIN_MARK_GAP=2.2;  // minimum visual clearance between a title and its first marker
+const ICON_LEFT_PAD=2.8; // dairy/gluten vectors paint ~2.8pt LEFT of their cm origin; without
+                         // this the leading icon lands back on the last letter of the title
+function bakedLastLine(it, PT){         // text of the baked final name line, for gap calibration
+  const sp=it.name_spans[it.name_spans.length-1];
+  const m=/^\((.*)\)Tj$/.exec(PT.slice(sp[0],sp[1]));
+  return m? m[1].replace(/\\([()\\])/g,'$1') : '';
+}
+/* Some drinks carry baked icons the fieldmap never captured (MANGO PICANTE's chillies, etc.): they
+   sit AFTER the J and are covered by no span, so a rename left them stranded on top of the new
+   name. Find them so they can ride along with the marker cluster. */
+function strayRowIcons(it, PT){
+  if(it._sri) return it._sri;
+  const band = it.photo_tile ? [it.photo_tile[1], it.photo_tile[1]+it.photo_tile[3]]
+                             : [it.top_y-50, it.top_y+20];
+  /* MERGE NOTE: live excluded only marker_span/dairy_span here, because live has no NEW-badge or
+     SPECIALS subsystem — that is unshipped local work. Locally those spans ARE deleted and
+     restamped, and the badge's own `cm` sits at x≈126 inside this scan window, so without excluding
+     them a badge is mistaken for a stray icon and gets an op inside a range that is also being
+     deleted. spliceBytes assumes non-overlapping ops, so that corrupted the stream from that point
+     on ("syntax error: unknown keyword" and every dish below vanishing). */
+  const covered=[it.marker_span, it.dairy_span, it.badge_span,
+                 it.specials_span, it.specials_text_span, it.photo_span].filter(Boolean);
+  const re=/q\s+1 0 0 1 (-?[\d.]+) (-?[\d.]+) cm/g; let m; const out=[];
+  while(m=re.exec(PT)){
+    const x=+m[1], y=+m[2];
+    if(y<band[0]||y>band[1]||x<12||x>180) continue;
+    if(covered.some(sp=>sp[0]<=m.index&&m.index<sp[1])) continue;   // dairy/J are restamped already
+    out.push({x, y, numStart:m.index+m[0].indexOf(m[1]), numEnd:m.index+m[0].indexOf(m[1])+m[1].length});
   }
-  return asc;
+  return it._sri=out;
 }
-function rowHeadroom(it, PT){
-  const t=it.photo_tile;
-  if(!t||t.length<4||it.top_y==null||!it.name_spans||!it.name_spans.length)
-    return (it.pitch!=null&&it.content_h!=null)? it.pitch-it.content_h : 0;   // no tile -> old estimate
-  return (t[1]+t[3]) - TOP_PAD - (it.top_y + rowTopInk(it,PT));
+// widest x the marker cluster reaches, relative to the baked name end — reserved when wrapping
+function markerReserve(it, PT, g){
+  const icons=strayRowIcons(it,PT);
+  const bakedRight=g.x0+bakedLastLine(it,PT).replace(/\s+$/,'').length*NAME_ADV*g.size;
+  let far=(it.mk_anchor? it.mk_anchor[0] : bakedRight)+4;
+  for(const ic of icons) far=Math.max(far, ic.x+5);
+  return Math.max(0, far-bakedRight);
 }
-/* How many lines this drink's NAME can occupy. Mirrors descCapacity: the baked spans, plus whatever
-   the row's headroom allows. A name CANNOT grow downward — the description's Tm is baked ~10pt
-   below the name baseline and a second line at -15.5pt would land on top of it — so extra lines are
-   stacked UPWARD, keeping the last line on the baked baseline (exactly how the artwork's own
-   two-line name, LEMON ICED TEA, is built). */
+// Locate the x-number inside a baked span so it can be nudged in place.
+function numSpanIn(PT, span, re){
+  const seg=PT.slice(span[0],span[1]); const m=re.exec(seg);
+  if(!m) return null;
+  const i=span[0]+m.index+m[0].indexOf(m[1]);
+  return {s:i, e:i+m[1].length, v:parseFloat(m[1])};
+}
+/* The artwork packs a few markers hard against the title (Surat's COLADA clears the "A" by 0.65pt,
+   so it reads as overlapping). Where the baked gap is under MIN_MARK_GAP, slide the whole baked
+   cluster right — icons AND the J AND any stray badge — leaving everything else as-is. */
+function tidyMarkerOps(it, PT, sh){
+  if(!it.name_spans || !it.name_spans.length) return [];
+  const g=nameGeomOf(it,PT);
+  const nameEnd=g.x0+bakedLastLine(it,PT).replace(/\s+$/,'').length*NAME_ADV*g.size;
+  const parts=[];
+  if(it.dairy_span){ const n=numSpanIn(PT,it.dairy_span,/q 1 0 0 1 (-?[\d.]+) /); if(n) parts.push({n, vis:n.v-ICON_LEFT_PAD}); }
+  if(it.marker_span){ const n=numSpanIn(PT,it.marker_span,/[\d.]+ 0 0 [\d.]+ (-?[\d.]+) -?[\d.]+ Tm/); if(n) parts.push({n, vis:n.v}); }
+  for(const ic of strayRowIcons(it,PT)) parts.push({n:{s:ic.numStart,e:ic.numEnd,v:ic.x}, vis:ic.x-ICON_LEFT_PAD});
+  if(!parts.length) return [];
+  const gap=Math.min.apply(null,parts.map(p=>p.vis))-nameEnd;
+  if(!(gap<MIN_MARK_GAP)) return [];
+  const d=MIN_MARK_GAP-gap;
+  return parts.map(p=>({s:p.n.s, e:p.n.e, rep:enc(num(p.n.v+d))}));
+}
+/* How many lines this drink's NAME can show: extra lines grow UPWARD from the baked last line,
+   bounded by the row's own top (the photo band), so they never touch the row above. */
+function nameRoom(it, g){
+  const B=it.name_spans.length, lh=Math.abs(g.lead)*g.size;
+  const rowTop = it.photo_tile ? it.photo_tile[1]+it.photo_tile[3]
+                               : (it.top_y!=null ? it.top_y+(it.pitch||FM.row_h||60)-14 : null);
+  if(rowTop==null) return Math.max(B,1);
+  const bakedBaseY = g.topY-(B-1)*lh;
+  const extra = Math.floor((rowTop - bakedBaseY - g.size*0.78)/lh);
+  return Math.max(B, Math.min(3, B+Math.max(0,extra)));
+}
+// Wrap a name to the text column (the photo rail starts at x=181) without breaking words.
+function nameWrap(lines, g, maxLines, reserve){
+  const perLine=Math.max(4, Math.floor((176-g.x0-(reserve||0))/(NAME_ADV*g.size)));
+  const out=[];
+  for(const ln of lines){
+    if(ln.length<=perLine){ out.push(ln); continue; }
+    let cur='';
+    for(const w of ln.split(/\s+/).filter(Boolean)){
+      if(!cur) cur=w;
+      else if((cur+' '+w).length<=perLine) cur+=' '+w;
+      else { out.push(cur); cur=w; }
+    }
+    if(cur) out.push(cur);
+  }
+  // Never DROP text: if it needs more lines than the row can hold, fold the remainder into the
+  // last allowed line (it may run wide, and the card warns) rather than silently losing words.
+  const cap=Math.max(1,maxLines);
+  if(out.length>cap){ const tail=out.slice(cap-1).join(' '); return out.slice(0,cap-1).concat([tail]); }
+  return out;
+}
+// The name lines a drink will actually RENDER (explicit breaks + wrap, capped by room).
+function renderedNameLines(it, PT, raw){
+  const g=nameGeomOf(it,PT);
+  return nameWrap(nameLines(raw), g, nameRoom(it,g), markerReserve(it,PT,g));
+}
+// kept as the public name for "how many lines fit", now answered by nameRoom()
 function nameCapacity(it, PT){
   const B=(it.name_spans||[]).length; if(!B) return 0;
-  const g=nameGeomOf(it,PT), lineH=Math.abs(g.lead)*g.size;
-  return B + Math.max(0, Math.floor(rowHeadroom(it,PT)/lineH));
+  return nameRoom(it, nameGeomOf(it,PT));
 }
-// where the marker cluster starts for an EDITED name (after its true last line)
+/* The clamp in regenerate() and the warning in validate() need the same ceiling as nameRoom(), but
+   expressed in POINTS of upward rise rather than a line count — the block also rises when the
+   DESCRIPTION grows, which a line count cannot express.
+   One deliberate difference from live's nameRoom(): it reserves only cap height (`size*0.78`), but
+   the topmost ink on a row is usually not the name — the marker cluster and NEW badge ride the
+   first line `raise` above its baseline, and across these two menus `raise` runs 5.85-8.61pt, so a
+   J sits ~4pt higher than the letters it labels. Reserve whichever is taller, or a row that
+   saturates its budget pushes the J through the divider rule drawn at the tile top. Verified by
+   render; pinned by the MANGO PICANTE row-box regression case. */
+function nameRoomFree(it, PT){
+  const g=nameGeomOf(it,PT);
+  const rowTop = it.photo_tile ? it.photo_tile[1]+it.photo_tile[3]
+                               : (it.top_y!=null ? it.top_y+(it.pitch||FM.row_h||60)-14 : null);
+  if(rowTop==null || it.top_y==null)
+    return (it.pitch!=null&&it.content_h!=null)? it.pitch-it.content_h : 0;   // no tile -> old estimate
+  let asc=g.size*0.78;                                    // live's cap-height reserve
+  if(it.mk_anchor){
+    const B=(it.name_spans||[]).length, lh=Math.abs(g.lead)*g.size;
+    const raise=it.mk_anchor[1]-(it.top_y-(B-1)*lh);
+    asc=Math.max(asc, raise + 0.67*((FM.jmark&&FM.jmark.size)||g.size));
+  }
+  return (rowTop - asc) - g.topY;
+}
+/* Where the marker cluster starts for an EDITED name (after its true last line).
+   Local keeps the `y0` parameter — rowLayout() moves the whole block when the description changes
+   length, and the markers have to follow it — while adopting live's self-calibrated horizontal pad:
+   the distance between this drink's baked last line and its baked anchor IS the designer's intended
+   spacing, so reuse it at the new length instead of a fixed 2.4pt. */
 function editedNameAnchor(it, nl2, PT, y0){
   const g=nameGeomOf(it,PT), B=it.name_spans.length;
   const M=Math.min(nl2.length, Math.max(B, nameCapacity(it,PT)));   // grown names count too
@@ -582,7 +677,9 @@ function editedNameAnchor(it, nl2, PT, y0){
   const _top=(y0!=null?y0:g.topY);
   const baseY=_top-(Math.min(M,B)-1)*lh, bakedBaseY=g.topY-(B-1)*lh;
   const raise=(it.mk_anchor?it.mk_anchor[1]:bakedBaseY+5.9)-bakedBaseY;
-  return [ g.x0 + lastLen*0.63*g.size + 2.4, baseY+raise ];
+  const bakedRight=g.x0+bakedLastLine(it,PT).replace(/\s+$/,'').length*NAME_ADV*g.size;
+  const pad=Math.max(1.0, it.mk_anchor? (it.mk_anchor[0]-bakedRight) : 4.9);
+  return [ g.x0 + lastLen*NAME_ADV*g.size + pad, baseY+raise ];
 }
 /* ---- NEW BADGE placement -------------------------------------------------------------------
    The badge sits to the RIGHT of the whole marker cluster, so a marker edit moves it exactly like
@@ -595,7 +692,7 @@ function badgePlace(it, mp, idx, set, PT, y0){
   const C=FM.mk_const, P=FM.micons&&FM.micons.newbadge; if(!P) return null;
   const W=iconW(P);
   const nameEd=(K(mp,idx,'name') in edits);
-  const nl2=nameEd? nameLines(edits[K(mp,idx,'name')]) : null;
+  const nl2=nameEd? renderedNameLines(it,PT,edits[K(mp,idx,'name')]) : null;
   const a=nameEd? editedNameAnchor(it,nl2,PT,y0) : (it.mk_anchor||[9.15, it.top_y]);
   let x=a[0] + markerRunW(set) + (C.gap_badge!=null?C.gap_badge:3.23);
   // never let a long name push the badge under the photo column
@@ -816,6 +913,16 @@ function spliceBytes(src, ops){ ops=ops.slice().sort((a,b)=>a.s-b.s); let L=src.
 
 async function regenerate(){
   const rowH=FM.row_h||60;
+  /* Has the user changed ANYTHING? Gates the baked-artwork tidy pass below, so a pristine export
+     stays byte-for-byte identical to the source PDF.
+     Test VALUES, not key presence: buildEditor() seeds reorder[page] with an identity permutation
+     for every page it draws, and added[page] can be an empty array — treating either as "edited"
+     made a no-op export nudge markers and lose byte identity. */
+  const _some = o => Object.values(o||{}).some(v => Array.isArray(v) ? v.length>0 : v!=null);
+  const _anyEdit = _some(edits) || _some(markerEdits) || _some(badgeEdits) ||
+                   _some(specialsEdits) || _some(photoUploads) || removed.size>0 ||
+                   Object.values(added||{}).some(a=>a&&a.length>0) ||
+                   Object.values(reorder||{}).some(r=>(r||[]).some((v,i)=>v!==i));
   for(const mp of FM.menu_pages){
     const ps=pageStreams[mp]; const pageData=FM.pages.find(p=>p.page===mp);
     const PT=new TextDecoder('latin1').decode(ps.pristine);
@@ -846,14 +953,14 @@ async function regenerate(){
       const dr=descRender(mp,origIdx,origIt);
       if(!nameEd && !dr) return;                       // untouched rows are never respliced
       const B=it.name_spans.length, ng=nameGeomOf(it,PT);
-      const typed=nameEd? nameLines(val(mp,origIdx,'name',origIt.name)) : null;
+      const typed=nameEd? renderedNameLines(it,PT,val(mp,origIdx,'name',origIt.name)) : null;
       let nN=typed? Math.min(typed.length, Math.max(B, nameCapacity(it,PT))) : B;   // `let`: the clamp below decrements it
       const nD=dr? dr.lines.filter(l=>l&&l.trim()).length : (it.desc_spans||[]).length;
       let L=rowLayout(it,PT,nN,nD);
       // nameCapacity and descCapacity each measure the row's headroom independently, so a grown
       // name AND a grown description can together rise past the row above. Merge name lines back
       // until the block fits rather than letting it collide.
-      const free=rowHeadroom(it,PT);
+      const free=nameRoomFree(it,PT);
       let clamped=false;
       while(nN>1 && (L.nameY0-ng.topY)>free+0.5){ nN--; clamped=true; L=rowLayout(it,PT,nN,nD); }
       const dtm=descTmOf(it,PT);
@@ -937,7 +1044,7 @@ async function regenerate(){
             ops.push({s:sp[0],e:sp[1],rep:enc(rep)});
           });
         } else {
-          const nl=nameToSpans(nameLines(val(mp,origIdx,'name',origIt.name)), it.name_spans.length);
+          const nl=nameToSpans(renderedNameLines(it,PT,val(mp,origIdx,'name',origIt.name)), it.name_spans.length);
           it.name_spans.forEach((sp,i)=>ops.push({s:sp[0],e:sp[1],rep:enc('('+escPdf(nl[i]||'')+')Tj')}));
         }
       }
@@ -977,7 +1084,7 @@ async function regenerate(){
           // description emptied: the volume has no line to ride, so it sits straight after the
           // NAME's last line — the way RED BULL/GINGER ALE/PERRIER[300ML] is drawn natively
           const _ng2=nameGeomOf(it,PT);
-          const _nl=(_lay.typed||nameLines(origIt.name)).filter(Boolean);
+          const _nl=(_lay.typed||renderedNameLines(it,PT,origIt.name)).filter(Boolean);
           const _lastTxt=_nl[Math.min(_lay.nN,_nl.length)-1]||'';
           vp={ x:_ng2.x0 + _lastTxt.length*0.63*_ng2.size + 1.2,
                y:_lay.L.nameY0-(Math.max(1,_lay.nN)-1)*Math.abs(_ng2.lead)*_ng2.size };
@@ -1001,6 +1108,19 @@ async function regenerate(){
       // uploaded photo -> draw over the drink's (shifted) tile; keyed by origIdx (photo belongs to the drink)
       const up=photoUploads[K0(mp,origIdx)];
       if(up&&it.photo_tile){ const t=it.photo_tile; append+=photoDrawOp(up,[t[0],t[1]+sh,t[2],t[3]]); }
+      // Baked markers packed too tight against the title get nudged clear (artwork fix). Only for
+      // rows we are NOT restamping below — a restamp already places the cluster from scratch — and
+      // only once the menu has been touched at all: an export with NO edits must stay byte-identical
+      // to the source, which is the cheapest corruption alarm this project has.
+      // MERGE NOTE: live could tidy any untouched row, but locally a row that REFLOWS has its
+      // marker `cm`/`Tm` numbers rewritten by the shift pass — the very numbers tidyMarkerOps
+      // rewrites. Two ops over one range corrupt the stream (spliceBytes assumes non-overlap), so
+      // a moving row keeps its baked spacing; the nudge is cosmetic and reflow is not.
+      if(_anyEdit && !sh && !(K(mp,origIdx,'name') in edits) && !(K0(mp,origIdx) in markerEdits) && !isReordered){
+        const _tidy=tidyMarkerOps(it, PT, sh)
+          .filter(t=>!ops.some(o=>o.s<t.e && o.e>t.s));   // belt-and-braces: never double-write a range
+        ops=ops.concat(_tidy);
+      }
       // markers ALWAYS sit under the whole title: restamp when name OR marker set changed, or reordered
       const _nameEd=(K(mp,origIdx,'name') in edits)||isReordered;
       const _mkEd=(K0(mp,origIdx) in markerEdits)||isReordered;
@@ -1008,8 +1128,15 @@ async function regenerate(){
       if((_nameEd||_mkEd||_mvN)&&it.mk_anchor){
         const set=(K0(mp,origIdx) in markerEdits)?new Set(markerEdits[K0(mp,origIdx)]):drinkMarkerSet(mp,origIdx,origIt);
         const _lg=layout.get(idx), _ly=_lg?_lg.L.nameY0:null;
-        const a=_nameEd?editedNameAnchor(it,nameLines(val(mp,origIdx,'name',origIt.name)),PT,_ly):(_ly!=null?[it.mk_anchor[0],it.mk_anchor[1]+(_ly-nameGeomOf(it,PT).topY)]:it.mk_anchor);
+        const a=_nameEd?editedNameAnchor(it,renderedNameLines(it,PT,val(mp,origIdx,'name',origIt.name)),PT,_ly):(_ly!=null?[it.mk_anchor[0],it.mk_anchor[1]+(_ly-nameGeomOf(it,PT).topY)]:it.mk_anchor);
         append+=stampMarkers(a[0],a[1]+sh,set);
+        // Baked icons the fieldmap never captured (MANGO PICANTE's chillies, stray badges) sit after
+        // the J under no span, so a rename left them stranded on top of the new title. Ride them
+        // along by the same delta the cluster moved.
+        if(_nameEd){ const dx=a[0]-it.mk_anchor[0];
+          if(Math.abs(dx)>0.05) for(const ic of strayRowIcons(it,PT))
+            ops.push({s:ic.numStart, e:ic.numEnd, rep:enc(num(ic.x+dx))});
+        }
       }
       // ---- SPECIALS bar. Emitted AFTER photoDrawOp above so an upload can't bury it. ----
       if(drinkSpecials(mp,origIdx,origIt)&&(!it.specials_span||up)){
@@ -1516,13 +1643,13 @@ function validate(){
     }
     // a name can grow upward into the row's headroom, but only so far — past nameCapacity the
     // extra lines get merged back onto the last line rather than collide with the row above.
-    // Uses the SAME rowHeadroom() budget regenerate() clamps with, so the warning can never
+    // Uses the SAME nameRoomFree() budget regenerate() clamps with, so the warning can never
     // disagree with what the exported PDF actually does.
     if(pageStreams[activePage] && c.it.name_spans && c.it.name_spans.length){
       const _PTn=new TextDecoder('latin1').decode(pageStreams[activePage].pristine);
-      const _typed=nameLines(val(activePage,c.idx,'name',c.it.name)).filter(Boolean).length;
+      const _typed=renderedNameLines(c.it,_PTn,val(activePage,c.idx,'name',c.it.name)).filter(Boolean).length;
       const _nD=r? r.lines.filter(l=>l&&l.trim()).length : (c.it.desc_spans||[]).length;
-      const _free=rowHeadroom(c.it,_PTn);
+      const _free=nameRoomFree(c.it,_PTn);
       const _ng=nameGeomOf(c.it,_PTn);
       let _fit=Math.max(1,_typed);
       while(_fit>1 && (rowLayout(c.it,_PTn,_fit,_nD).nameY0-_ng.topY)>_free+0.5) _fit--;

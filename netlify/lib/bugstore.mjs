@@ -48,3 +48,29 @@ export async function listLive(s) {
 }
 
 export const newId = () => PREFIX + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
+
+/* ---- INPUT CLAMPS ---------------------------------------------------------------------------
+   POST /api/bug is public and unauthenticated. These mirror deploy/worker.js EXACTLY — the two
+   deployments must not drift, or one host stores what the other rejects. The /bugs/ dashboard
+   renders these fields into markup and its operator's browser holds BUG_KEY in localStorage. */
+export const MAX_BODY  = 1_200_000;   // whole request; a snapshot is the only large field
+export const MAX_SHOT  =   900_000;   // ~660KB of image after base64
+export const MAX_STATE =   200_000;   // serialised editor state; was previously UNBOUNDED
+
+// a snapshot must be an inline raster image — never data:text/html, never a bare string
+export const safeShot = (s) => (typeof s === 'string' && s.length <= MAX_SHOT &&
+  /^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/.test(s)) ? s : null;
+
+// links are opened by the dashboard operator; http(s) only, and bounded
+export const safeUrl = (u) => {
+  if (typeof u !== 'string' || !u) return '';
+  try { const x = new URL(u); return (x.protocol === 'http:' || x.protocol === 'https:') ? u.slice(0, 300) : ''; }
+  catch { return ''; }
+};
+
+// keep the editor state, but never let it grow the record without bound
+export const clampState = (s) => {
+  if (!s || typeof s !== 'object') return null;
+  try { const j = JSON.stringify(s); return j.length > MAX_STATE ? { truncated: true, bytes: j.length } : s; }
+  catch { return null; }
+};

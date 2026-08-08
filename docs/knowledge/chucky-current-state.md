@@ -256,29 +256,59 @@ rest of the stream and every dish below vanishes). **Honest note:** no weld was 
 lineage either before or after the guard — local's newer `mergeSpans` carve appears to keep spans on
 operator boundaries — so it is defensive parity, not an active fix.
 
-**Still live-only, and the one thing blocking any deploy:** the Surat/Ahm name-wrap subsystem —
-`nameWrap`, `nameRoom`, `renderedNameLines`, `bakedLastLine`, `markerReserve`, `strayRowIcons`,
-`tidyMarkerOps`, `numSpanIn`, `wrapTo`. `strayRowIcons` handles baked icons the fieldmap never
-captured. Live's `nameRoom()` already uses `photo_tile` as the row box — the same source of truth the
-local fitting fix independently derived.
+**The Surat/Ahm name-wrap subsystem is now ported (Phase 0e)** — `nameWrap`, `nameRoom`,
+`renderedNameLines`, `bakedLastLine`, `markerReserve`, `strayRowIcons`, `tidyMarkerOps`, `numSpanIn`,
+plus live's measured `NAME_ADV=0.6383` (0.63 under-measured by ~1pt over 6 glyphs and pulled the
+marker cluster back into the last letter). Local `rowHeadroom`/`rowTopInk` are retired: live's
+`nameRoom()` already measured the row from `photo_tile`, the same source of truth the local fix
+independently derived, and additionally gives automatic word-wrap and marker-width reservation.
+Names now wrap **without the user typing line breaks**.
+
+Three conflicts surfaced that live could not have had, because badge/SPECIALS is unshipped local work:
+
+1. `strayRowIcons` excluded only `marker_span`/`dairy_span`. Locally the NEW badge's own `cm` sits at
+   x≈126 inside its scan window, so a badge was mistaken for a stray icon and got an op inside a
+   range that was **also being deleted** → overlapping ops → corrupt stream. Now excludes
+   `badge_span`, `specials_span`, `specials_text_span`, `photo_span`.
+2. `tidyMarkerOps` rewrites the same `cm`/`Tm` numbers local's **reflow shift** rewrites. A row that
+   moves now keeps its baked spacing (the nudge is cosmetic; reflow is not), plus a defensive
+   overlap filter.
+3. Tidying on an untouched export broke **empty-edit byte identity**. It is now gated on a
+   value-aware "has anything actually changed" check — `buildEditor()` seeds `reorder[page]` with an
+   *identity* permutation, so key-presence alone reported a no-op as an edit.
+
+Retained unchanged: local's `rowLayout` (bottom-anchored, price-pinned), the description/volume
+subsystem, badge/SPECIALS, `mergeSpans`, `keepState`, and the `let nN` export-crash fix.
 
 The fork is dated by `capiche-drinks-editors.md`: multi-line names deployed 2026-07-15 (`ee8c6ef1`);
 NEW-badge + SPECIALS toggles built 2026-07-27 and *"NOT yet deployed"* — the latter is the local-only
 work. `backups/*_20260727_170244.html` predate **both** lineages and cannot serve as a base.
 
-**Until that subsystem lands, deploying this repo removes working production features.**
+**Phase 0 is complete: local is now a superset of live.** Deploying no longer removes production
+features — but nothing here has been deployed, and the deploy itself remains unverified.
 
 ---
 
 ## 10. Security risks
 
-1. **Stored XSS in `/bugs/`** — see §8. Can exfiltrate `BUG_KEY`.
+1. ~~**Stored XSS in `/bugs/`**~~ — **FIXED in Phase 0d.** `esc()` now escapes quotes and backticks;
+   `b.shot` must match `data:image/(png|jpeg|webp);base64,…` or it is dropped and reported as
+   "snapshot rejected"; `b.url` must be an absolute `http(s)` URL; `pill()` escapes an unknown
+   status; `b.page` is coerced to a number; ids are escaped. Server-side clamps were added to
+   **both** deployments (`deploy/worker.js` and `netlify/lib/bugstore.mjs`) with a 1.2 MB body cap,
+   a 900 KB snapshot cap and a 200 KB state cap — `state` was previously **unbounded**.
+   Covered by `test/bugapi.test.mjs` (20 assertions, incl. the two implementations agreeing) and
+   `test/bugsdash.test.mjs` (9 assertions driving the real `render()` against poisoned records).
+   Client-side hardening is deliberate defence-in-depth: records written *before* this change are
+   still in the store, and the dashboard cannot tell where a record came from.
 2. **The passphrase gate is decorative.** Only `/chucky/` and `/menu/` check it; every editor and
    `/bugs/` are reachable directly — verified live, HTTP 200 with full content, unauthenticated. The
    gate only hides the tile list, and the passphrase *and its SHA-256* are published in the repo's
    root `README.md`. This must not be treated as authorization.
-3. **`POST /api/bug` is unauthenticated**, CORS `*`, no rate limit. `shot` is capped at 900 KB but
-   **`state` has no size cap at all**.
+3. **`POST /api/bug` is still unauthenticated**, CORS `*`, and has **no rate limit** — Phase 0d
+   bounded *what* an anonymous caller can store (body/snapshot/state caps, type checks) but not *how
+   often*. Flooding the store is still possible; rate limiting needs a platform primitive
+   (Cloudflare rules / Netlify edge) rather than application code, so it is a deployment decision.
 4. **`BUG_KEY` travels in the query string** — lands in access logs, browser history, referrers.
    Its value is not in this repo's history and the scratchpad that held it is gone, so it likely
    needs reissuing.
@@ -299,8 +329,15 @@ work. `backups/*_20260727_170244.html` predate **both** lineages and cannot serv
   bugs as declared known-failures.
 - **0c** ✅ done — ADD font selection via `pageFonts(p)`. The companion "ADD charset" item was
   investigated and **withdrawn**: no such bug exists (see §8).
-- **0d** `/bugs/` XSS, payload caps, URL validation.
-- **0e** Surat/Ahm name-wrap reconciliation. **No deploy is safe before this.**
+- **0d** ✅ done — `/bugs/` XSS neutralised, payload caps and URL/type validation on both
+  deployments. Rate limiting deliberately left out (platform-level, not application-level).
+- **0e** ✅ done — Surat/Ahm name-wrap subsystem ported; **local is now a superset of live**, so a
+  deploy no longer removes production functionality. Nothing has been deployed, and the deploy
+  itself is still unverified against the live URL.
+
+**Phase 0 is complete.** The next deploy is the first one that is safe in principle — it still needs
+the full pre-deploy checklist (status → diff → syntax → test → render → verify all six → deploy →
+hard-refresh → verify production) and should go out one editor at a time.
 
 **Then, in order of dependency rather than ambition:** category editing (needs the vector-overlay
 strategy and a font-subset decision first), dish-editor expansion, markers/badges, typography and

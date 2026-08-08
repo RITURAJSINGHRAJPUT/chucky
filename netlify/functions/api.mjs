@@ -6,7 +6,8 @@
 //   POST   /api/bug/:id?k=   merge patch into a record
 // Static assets are served by Netlify from deploy/public (see netlify.toml), which is what the
 // Worker's final `env.ASSETS.fetch(request)` fallback did.
-import { store, listLive, readRec, newId, cors, J, authed } from '../lib/bugstore.mjs';
+import { store, listLive, readRec, newId, cors, J, authed,
+         MAX_BODY, safeShot, safeUrl, clampState } from '../lib/bugstore.mjs';
 
 // When this function returns a non-2xx, Netlify retries the static-resolution chain — the same
 // request arrives again as /api/bugs.html, /api/bugs.htm, /api/bugs/index.html, /api/bugs/index.htm
@@ -25,17 +26,19 @@ export default async (req, context) => {
   // report a bug (from the editor) — public
   if (path === '/api/bug' && req.method === 'POST') {
     try {
-      const b = await req.json();
+      const raw = await req.text();
+      if (raw.length > MAX_BODY) return J({ ok: false, error: 'payload too large' }, 413);
+      const b = JSON.parse(raw);
       const id = newId();
-      // identical clamps to the Worker — these bound what an editor can push into the store
+      // identical clamps to the Worker — these bound what an anonymous caller can push into the store
       const rec = {
         id, t: Date.now(), status: 'new',
         editor: String(b.editor || '').slice(0, 60),
-        page: b.page ?? null,
+        page: Number.isFinite(+b.page) ? +b.page : null,
         desc: String(b.desc || '').slice(0, 2000),
-        url: String(b.url || '').slice(0, 300),
-        state: (b.state && typeof b.state === 'object') ? b.state : null,
-        shot: (typeof b.shot === 'string' && b.shot.length < 900000) ? b.shot : null,
+        url: safeUrl(b.url),
+        state: clampState(b.state),
+        shot: safeShot(b.shot),
       };
       await s.setJSON(id, rec);
       return J({ ok: true, id });
