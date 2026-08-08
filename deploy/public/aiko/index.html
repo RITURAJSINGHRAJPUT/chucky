@@ -333,6 +333,42 @@ function descTm(f){            // the block's Tm (so we can swap the size)
   f._tm=last?{s:st+last.index,e:st+last.index+last[0].length,size:parseFloat(last[1]),x:parseFloat(last[3]),y:parseFloat(last[4])}:null;
   return f._tm;
 }
+/* ---- GRAMS TAG FOLLOWS THE DESCRIPTION ------------------------------------------------------
+   The grams tag ("[250gms]") is NOT part of the description run: it is its own Tj with its own
+   absolute Tm, parked at the end of the baked LAST description line. Editing the description
+   re-flows that line, but the tag used to stay put — so a longer last line printed straight
+   through it (CHEESE & CHILLI DUMPLINGS: "chillies, Water Chestnut" collided with "[250gms]").
+   The added-dish stamp already derives the tag's x from its rendered last line; baked rows now do
+   the same. Shift by the DELTA from the baked geometry rather than recomputing absolutely, so the
+   designer's own gap survives and an UNCHANGED last line re-emits a byte-identical matrix.
+   Aiko-only: Capiche folds grams into the description string and Churn'd has no descriptions. */
+const _gPairByPage={};
+function gramsForDesc(f){                 // the grams field belonging to this desc field, or null
+  const p=f.page;
+  if(_gPairByPage[p]===undefined){
+    const m={};
+    for(const it of itemsForPage(p).items) if(it.desc && it.grams) m[it.desc.id]=it.grams;
+    _gPairByPage[p]=m;
+  }
+  return _gPairByPage[p][f.id]||null;
+}
+// grams matrices carry a hair of skew (`5 0.0005 -0.0005 5 x y`), so this cannot reuse descTm's
+// stricter `a 0 0 d` pattern — that would find no match and silently leave the tag behind.
+function gramsTm(g){
+  if(g._gtm!==undefined) return g._gtm;
+  const t=pageText(g.page), s0=g.tj_span[0];
+  const bt=t.lastIndexOf('BT',s0), st=bt>=0?bt:Math.max(0,s0-200);
+  const re=/(-?[\d.]+) (-?[\d.]+) (-?[\d.]+) (-?[\d.]+) (-?[\d.]+) (-?[\d.]+) Tm/g;
+  let m,last=null; const seg=t.slice(st,s0);
+  while((m=re.exec(seg))) last=m;
+  g._gtm = last ? {s:st+last.index, e:st+last.index+last[0].length, v:last.slice(1,7).map(Number)} : null;
+  return g._gtm;
+}
+function bakedDescLine(f,i){              // text of one baked description line, parens stripped
+  const sp=f.line_spans && f.line_spans[i]; if(!sp) return '';
+  const m=/^\(([\s\S]*)\)$/.exec(pageText(f.page).slice(sp[0],sp[1]));
+  return m ? m[1].replace(/\\([()\\])/g,'$1') : '';
+}
 /* ---- STATE-PRESERVING DELETE ----------------------------------------------------------------
    Deleting a byte span can strip graphics/text state that LATER, UN-DELETED content inherits.
    The food editors hit this with fonts (see keepFont() in capiche/index.html + the knowledge doc
@@ -742,6 +778,23 @@ function opsForPage(fields, priceShift, skip){
         for(let k=i+1;k<n;k++) rep+='Tj\n0 '+fmtNum(lead)+' Td\n('+escPdf(lines[k]||'')+')';
         ops.push({s:sp[0],e:sp[1],rep:enc(rep)});
       });
+      // ...and move the grams tag to the end of whatever the last line now is (see gramsForDesc)
+      const _gf=gramsForDesc(f), _gtm=_gf&&gramsTm(_gf);
+      if(_gtm){
+        const _bi=B-1, _li=Math.max(0,last-1);
+        // measure to the last VISIBLE glyph plus one space: the artwork gets its gap from a trailing
+        // space inside the baked run ("red chillies "), which retyping strips — without this the tag
+        // butts straight against the final letter. Both sides get the same +1, so an unchanged line
+        // still yields a zero delta and a byte-identical matrix.
+        const _rt=s=>String(s).replace(/\s+$/,'').length+1;
+        const _bLast=bakedDescLine(f,_bi), _nLast=lines[_li]||'';
+        const _nx=_gf.x + ADV.desc*(fit.size*_rt(_nLast) - f.size*_rt(_bLast));
+        const _ny=_gf.y + lead*(fit.size*_li - f.size*_bi);
+        if(Math.abs(_nx-_gf.x)>0.005 || Math.abs(_ny-_gf.y)>0.005){
+          const _v=_gtm.v.slice(); _v[4]=_nx; _v[5]=_ny;
+          ops.push({s:_gtm.s,e:_gtm.e,rep:enc(_v.map(fmtNum).join(' ')+' Tm')});
+        }
+      }
     } else if(f.role==='header'){
       if(!hasEdit) continue;
       /* Headers are drawn per kerning group — (Ri)Tj 0 Tc 0 Tw (c)Tj 1.471 0 Td (e)Tj — so patching
