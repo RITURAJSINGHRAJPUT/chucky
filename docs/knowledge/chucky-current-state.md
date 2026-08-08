@@ -230,7 +230,36 @@ Page 0 gains ~10.6 KB of re-emitted `/GS0 gs /TT0 1 Tf 0 Tc 0 Tw` state blocks e
 Present at `HEAD` and before any recent change. Not a corruption (renders correctly) but it breaks
 the cleanest invariant we have.
 
-**Category editing is blocked by two artwork facts** (Aiko, investigated in depth):
+**Category editing — SHIPPED for Aiko (Phase 2), within a hard font ceiling.**
+Each heading is a pair of real text runs: a serif category name (`/TT1`, size 16) and a gold
+handwritten label beside it (`/TT2`, size 12, colour `0.933 0.698 0.169 rg`). Both now edit
+byte-level from a **MENU SECTIONS** panel at the top of the editor, writing into the same `edits`
+object dish edits use — so Save, Preview, Export and working-copy memory needed no new plumbing.
+Colour and font survive structurally: the gold `rg` and the `/TT2 Tf` sit *between* the two runs,
+outside both `run_span`s, so replacing run contents cannot disturb them.
+
+Two traps, both now handled and pinned by regression cases:
+
+- The label exists **twice** — as text AND as stroked vector letterforms painted on top (8 `q..Q`
+  groups, ~15.5 KB for "Starters"). Editing only the text drew the new word over the old one. The
+  overlay is redundant with the filled text (removing it alone is visually identical to the baked
+  artwork), so it is deleted whenever the label changes; the span is derived at runtime, no
+  fieldmap rebuild.
+- `flourish_cm` points **inside** that overlay. Emitting both the overlay delete and the flourish
+  nudge put two ops over one range; the heading vanished and the label reverted to the old word in
+  black. The flourish op is now skipped when the overlay goes.
+
+**The ceiling is real and unavoidable without new fonts:** `/TT1` = `" DMNRSacdehilmnorstu"`,
+`/TT2` = `"LSaeghilmnoprstuwy"` with **no space glyph**. "Small Plates" (no `P`), "Dumplings"
+(no `p`, `g`) and "TO SHARE" (no space, no caps) are all unrepresentable. The panel reports exactly
+which characters cannot print and refuses to preview them. Lifting this needs fuller subsets of
+Geist-Regular and GhostCallsDialog2 embedded — still byte-level, but a separate piece of work
+requiring the designer's font files.
+
+**Aiko only.** Capiche has `sections` but no header text fields; Churn'd, Aiko-drinks and both
+Capiche drinks editors have neither. Each needs its own discovery pass against its own artwork.
+
+Historical note — the two artwork facts that made this look impossible at first:
 1. The gold decorative label is **text *and* stroked vector letterforms superimposed** — 15,566 bytes
    and 368 curve operators for "Starters" alone, in 8 `q..Q` groups spanning exactly the word's
    x-range. Editing only the text run yields a double image. *Deleting the vector layer and retyping

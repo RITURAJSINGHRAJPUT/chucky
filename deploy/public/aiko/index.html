@@ -78,6 +78,15 @@ header.bar{display:flex;align-items:center;gap:16px;padding:10px 18px;border-bot
 .hitbox.sel{background:var(--aiko-soft);box-shadow:inset 0 0 0 1.5px var(--aiko-line)}
 .card.flash{animation:cardflash 1.15s ease-out}
 @keyframes cardflash{0%,100%{box-shadow:0 0 0 0 transparent}18%{box-shadow:0 0 0 2px var(--aiko)}}
+.secpanel{margin-bottom:18px}
+.seccard{padding:13px 14px}
+.sectitle{font-family:var(--mono);font-size:11px;letter-spacing:.09em;color:var(--aiko);font-weight:700;margin-bottom:9px}
+.secrow{margin-bottom:9px}
+.secrow:last-child{margin-bottom:0}
+.seclbl{display:block;font-size:10.5px;letter-spacing:.05em;text-transform:uppercase;color:var(--muted);margin-bottom:4px}
+.secinp{width:100%;background:#100E09;border:1px solid var(--line2);border-radius:7px;color:var(--cream);font-family:var(--mono);font-size:13.5px;padding:8px 10px;outline:none}
+.secinp:focus{border-color:var(--aiko-line)}
+.secinp.script{color:#E7B84F;font-style:italic}
 #export{background:var(--aiko);color:#1a1400;font-weight:700;letter-spacing:.03em;padding:9px 16px;border-radius:9px;font-size:13px;transition:.15s}
 #export:hover{filter:brightness(1.07);transform:translateY(-1px)}
 #export:disabled{opacity:.4;cursor:not-allowed;transform:none;filter:none}
@@ -820,11 +829,24 @@ function opsForPage(fields, priceShift, skip){
       }
       ops.push({s:f.run_span[0],e:f.run_span[1],
         rep:enc(fmtNum(f.size)+' 0 0 '+fmtNum(f.size)+' '+fmtNum(hx)+' '+fmtNum(f.y)+' Tm\n0 Tc 0 Tw\n('+escPdf(val)+')Tj')});
+      /* A decorative label exists TWICE in the artwork: as this /TT2 text run AND as stroked vector
+         letterforms drawn on top of it (8 `q..Q` groups and ~15.5KB for "Starters" alone, spanning
+         exactly the word's x-range). Editing only the text left the old word's outline in place, so
+         the new label rendered on top of the old one — which is why this was left "script WIP".
+         The stroke is redundant with the filled text (removing it alone is visually identical to
+         the baked artwork, verified by render), so drop it whenever the label changes. */
+      if(f.kind==='script'){ const vs=labelVectorSpan(f); if(vs) ops.push({s:vs[0],e:vs[1],rep:enc('\n')}); }
       // The gold flourish under a script word is a stroked path whose cm origin sits INSIDE the
       // word. It cannot stretch, so move it by exactly the delta the word moved — that preserves
       // its baked offset from the word's start. Without this a wider retyped word slides underneath
       // the stationary squiggle and the two collide.
-      if(f.flourish_cm && Math.abs(hx-f.x)>0.005)
+      // ...but only when that artwork still exists. `flourish_cm` points INSIDE the vector overlay
+      // deleted just above (it is that overlay's first `cm` x), so emitting both puts two ops over
+      // one range — spliceBytes assumes non-overlapping ops and the stream corrupts from there
+      // (the heading vanished and the label reverted to the old word in black).
+      const _vec=(f.kind==='script')?labelVectorSpan(f):null;
+      const _flourishGone=!!(_vec && f.flourish_cm && f.flourish_cm[0]>=_vec[0] && f.flourish_cm[1]<=_vec[1]);
+      if(f.flourish_cm && !_flourishGone && Math.abs(hx-f.x)>0.005)
         ops.push({s:f.flourish_cm[0],e:f.flourish_cm[1],rep:enc(fmtNum(f.flourish_x+(hx-f.x)))});
     } else if(f.role==='grams'){
       if(hasEdit) ops.push({s:f.tj_span[0],e:f.tj_span[1],rep:enc('('+escPdf(val)+')')});
@@ -1236,6 +1258,29 @@ function itemsForPage(p){
 // text width from the header font's own /Widths (1000-unit em), stored on the field
 function headerAdv(f, str){ let w=0; const W=f.widths||{};
   for(const ch of String(str||'')) w+=(W[ch]||0); return w/1000*f.size; }
+/* Byte range of the stroked vector letterforms that sit ON TOP of a decorative label's text run.
+   Derived at runtime rather than baked into the fieldmap so no rebuild is needed: walk from the end
+   of the label's text run to the next BT (the following text block) and take the first `q .. cm`
+   through the last `Q`. Measured per label: 3.0-15.6KB, 2-8 glyph groups. */
+function labelVectorSpan(f){
+  if(f._vec!==undefined) return f._vec;
+  if(f.kind!=='script'||!f.run_span) return f._vec=null;
+  const t=pageText(f.page), start=f.run_span[1];
+  const nextBT=t.indexOf('BT',start); if(nextBT<0) return f._vec=null;
+  const seg=t.slice(start,nextBT);
+  const first=seg.search(/q 1 0 0 1 -?[\d.]+ -?[\d.]+ cm/), lastQ=seg.lastIndexOf('\nQ\n');
+  if(first<0||lastQ<0||lastQ<first) return f._vec=null;
+  return f._vec=[start+first, start+lastQ+1];
+}
+/* How many characters of `val` this header font cannot print. The category fonts are SUBSETS
+   holding only the glyphs the artwork already uses — /TT1 (names) has no lowercase b/f/g/p/… and
+   only D M N R S in caps; /TT2 (labels) has no space at all — so most realistic renames are simply
+   not representable. Surfaced in the UI rather than silently dropped. */
+function headerBadChars(f, val){
+  const cs=f.charset||''; const out=[];
+  for(const ch of new Set(String(val||''))) if(cs.indexOf(ch)<0) out.push(ch);
+  return out;
+}
 function descText(d){ return (d.id in edits)? edits[d.id] : d.display; }
 
 /* ---- SECTION MODEL ---------------------------------------------------------------------------
@@ -1352,6 +1397,62 @@ function renderAddZone(ed){
   };
 }
 
+/* ---- MENU SECTIONS panel --------------------------------------------------------------------
+   Each category heading in the artwork is a PAIR of text runs: a serif category name ("Sides") and
+   a gold handwritten label beside it ("Starters"). Both are real text with their own byte spans, so
+   both are edited the same byte-level way as a dish name — no overlay, no re-typesetting.
+   The hard limit is the font: these are SUBSET fonts carrying only the glyphs the artwork already
+   uses, so most renames are impossible and the UI has to say so plainly rather than silently drop
+   characters. Everything writes into the same `edits` object dish edits use, so Save / Preview /
+   Export / working-copy memory all pick it up with no extra plumbing. */
+function buildSectionPanel(ed){
+  const heads=FM.fields.filter(f=>f.role==='header'&&f.kind==='serif'&&f.page===activePage);
+  if(!heads.length) return;
+  const wrap=document.createElement('div'); wrap.className='secpanel';
+  const hd=document.createElement('div'); hd.className='grouphd sechd';
+  hd.innerHTML='<span>MENU SECTIONS</span><span class="n">'+heads.length+' on this page</span>';
+  wrap.appendChild(hd);
+
+  for(const sf of heads){
+    const lf=FM.fields.find(q=>q.id===sf.pair);
+    const card=document.createElement('div'); card.className='card seccard';
+    const ttl=document.createElement('div'); ttl.className='sectitle';
+    ttl.textContent=sf.label||sf.display; card.appendChild(ttl);
+
+    const row=(labelText, f, placeholder)=>{
+      if(!f) return;
+      const w=document.createElement('div'); w.className='secrow';
+      const lb=document.createElement('label'); lb.className='seclbl'; lb.textContent=labelText;
+      const inp=document.createElement('input'); inp.className='secinp'; inp.spellcheck=false;
+      inp.value=(f.id in edits)?edits[f.id]:f.display; inp.placeholder=placeholder;
+      if(f.kind==='script') inp.classList.add('script');
+      const meta=document.createElement('div'); meta.className='afmeta';
+      const check=()=>{
+        const v=inp.value;
+        const bad=headerBadChars(f,v);
+        // the label font has no space glyph at all, so flag it by name rather than as a blank
+        const shown=bad.map(c=>c===' '?'space':c);
+        if(bad.length){ meta.textContent='can’t print:  '+shown.join('  '); meta.className='afmeta bad'; }
+        else if(!v.trim()){ meta.textContent='empty — this heading will disappear'; meta.className='afmeta bad'; }
+        else { meta.textContent='✓ fits · '+headerAdv(f,v).toFixed(1)+'pt wide'; meta.className='afmeta'; }
+        return !bad.length && !!v.trim();
+      };
+      inp.oninput=()=>{
+        const okNow=check();
+        if(inp.value===f.display) delete edits[f.id]; else edits[f.id]=inp.value;
+        try{ MEM.tick(); }catch(_){}
+        if(okNow) schedulePreview();
+        updateGate();
+      };
+      check();
+      w.appendChild(lb); w.appendChild(inp); w.appendChild(meta); card.appendChild(w);
+    };
+    row('Category name', sf, 'Sides');
+    row('Decorative label', lf, 'Starters');
+    wrap.appendChild(card);
+  }
+  ed.appendChild(wrap);
+}
 function buildEditor(){
   const ed=document.getElementById('editor'); ed.innerHTML="";
   const {items,extras}=itemsForPage(activePage);
@@ -1375,6 +1476,7 @@ function buildEditor(){
   })();
   window.__secCounts={};
   for(const it of items){ const L=_secOf[it.name.id]||'—'; if(!(L in window.__secCounts)) window.__secCounts[L]={live:0}; if(!removed.has(it.name.id)) window.__secCounts[L].live++; }
+  buildSectionPanel(ed);
   let _lastSec=null, _secIdx=-1;
   for(const it of items){
     const _L=_secOf[it.name.id]||'';
