@@ -1,6 +1,7 @@
 // Marker-edit test: boot engine, toggle markers on several dishes, regenerate, save for render.
 const fs=require('fs'), path=require('path'), vm=require('vm');
 const {JSDOM}=require('jsdom'); const PDFLib=require('pdf-lib');
+const {outDir}=require('../../test/lib/out');   // repo-relative, gitignored artefact dir
 const DIR=path.join(__dirname,'..','..','deploy','public','capiche');
 const html=fs.readFileSync(path.join(DIR,'index.html'),'utf8');
 const engine=(html.match(/<script>([\s\S]*?)<\/script>/g)||[]).map(s=>s.replace(/^<script>|<\/script>$/g,'')).find(s=>s.includes('PDFDocument')&&s.includes('regenerate'));
@@ -21,7 +22,7 @@ const ctx=win; vm.createContext(ctx);
 ctx.window=win; ctx.document=win.document; ctx.globalThis=ctx;
 try{ vm.runInContext(engine+epilogue, ctx); }catch(e){ console.error('THREW',e); process.exit(1); }
 const H=ctx.__h;
-const P='/private/tmp/claude-501/-Users-apple/dd29cd90-79fd-49fd-9b88-6e90a1b2a4c4/scratchpad/';
+const P=(outDir()+path.sep);
 (async()=>{
   for(let i=0;i<300 && !H.ready();i++) await new Promise(r=>setTimeout(r,25));
   if(!H.ready()){ console.log('BOOT FAILED'); process.exit(1); }

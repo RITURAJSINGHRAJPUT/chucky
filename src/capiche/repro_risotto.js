@@ -2,6 +2,7 @@
 // remove TOMATO BUTTER RISOTTO (1:40), regenerate, write the edited PDF for a pymupdf render.
 const fs=require('fs'), path=require('path'), vm=require('vm');
 const {JSDOM}=require('jsdom');
+const {outDir}=require('../../test/lib/out');   // repo-relative, gitignored artefact dir
 const PDFLib=require('pdf-lib');
 const DIR=path.join(__dirname,'..','..','deploy','public','capiche');
 const html=fs.readFileSync(path.join(DIR,'index.html'),'utf8');
@@ -39,11 +40,11 @@ const H=ctx.__h;
   if(!H.ready()){ console.log('BOOT FAILED (FM/pageStreams not ready)'); process.exit(1); }
   // baseline (no edits)
   let b=await H.regenerate();
-  fs.writeFileSync('/private/tmp/claude-501/-Users-apple/dd29cd90-79fd-49fd-9b88-6e90a1b2a4c4/scratchpad/capiche_baseline.pdf', Buffer.from(b));
+  fs.writeFileSync(path.join(outDir(), 'capiche_baseline.pdf'), Buffer.from(b));
   // remove TOMATO BUTTER RISOTTO
   const target=H.FM.fields.find(f=>f.role==='name'&&f.page===1&&(f.display||'').toUpperCase().includes('TOMATO BUTTER RISOTTO'));
   console.log('target:', target && target.id, target && target.display);
-  const P='/private/tmp/claude-501/-Users-apple/dd29cd90-79fd-49fd-9b88-6e90a1b2a4c4/scratchpad/';
+  const P=(outDir()+path.sep);
   // Scenario A: remove TOMATO BUTTER RISOTTO (its badge must disappear, survivors keep theirs)
   H.removed.clear(); H.removed.add(target.id);
   b=await H.regenerate(); fs.writeFileSync(P+'capiche_removed.pdf', Buffer.from(b));

@@ -2,6 +2,7 @@
 // drives name/desc/price edits through regenerate(), asserts on output bytes.
 const fs=require('fs'), path=require('path'), vm=require('vm');
 const {JSDOM}=require('jsdom');
+const {outDir}=require('../../test/lib/out');   // repo-relative, gitignored artefact dir
 const PDFLib=require('pdf-lib');
 const DIR=path.join(__dirname,'..','..','deploy','public','drinks');
 const html=fs.readFileSync(path.join(DIR,'index.html'),'utf8');
@@ -66,7 +67,7 @@ const ok=(c,m)=>{ if(c){pass++;console.log('  ✓ '+m);} else {fail++;console.lo
   H.edits[firstDesc.id]='Elderflower, lime, soda';
   H.edits[firstPrice.id]='350';
   b=await H.regenerate();
-  fs.writeFileSync('/private/tmp/claude-501/-Users-apple/dd29cd90-79fd-49fd-9b88-6e90a1b2a4c4/scratchpad/drinks_edited.pdf', Buffer.from(b));
+  fs.writeFileSync(path.join(outDir(), 'drinks_edited.pdf'), Buffer.from(b));
   console.log('wrote drinks_edited.pdf');
 
   console.log('\n'+(fail===0?'PASS':'FAIL')+' — '+pass+' passed, '+fail+' failed');

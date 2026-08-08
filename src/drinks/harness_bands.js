@@ -2,6 +2,7 @@
 // asserts on output bytes, saves rebuilt PDFs for a pymupdf viewer audit.
 const fs=require('fs'), path=require('path'), vm=require('vm');
 const {JSDOM}=require('jsdom');
+const {outDir}=require('../../test/lib/out');   // repo-relative, gitignored artefact dir
 const PDFLib=require('pdf-lib');
 const DIR=path.join(__dirname,'..','..','deploy','public','drinks');
 const html=fs.readFileSync(path.join(DIR,'index.html'),'utf8');
@@ -40,7 +41,7 @@ const ok=(c,m)=>{ if(c){pass++;console.log('  ✓ '+m);} else {fail++;console.lo
   ok(str(b).indexOf('(KALA KHATTA SODA)')>=0,'baseline: first band name present as literal');
   ok(str(b).indexOf('(IYOSHI COLA)')>=0,'baseline: soft-drink line present');
   ok(str(b).indexOf(' re f')>=0,'baseline: gradient strips emitted (re f)');
-  fs.writeFileSync('/private/tmp/claude-501/-Users-apple/dd29cd90-79fd-49fd-9b88-6e90a1b2a4c4/scratchpad/drinks_rebuilt.pdf', Buffer.from(b));
+  fs.writeFileSync(path.join(outDir(), 'drinks_rebuilt.pdf'), Buffer.from(b));
 
   // edit a name
   H.BANDS[0].name='ELDERFLOWER FIZZ';
@@ -56,7 +57,7 @@ const ok=(c,m)=>{ if(c){pass++;console.log('  ✓ '+m);} else {fail++;console.lo
   ok(H.BANDS.filter(x=>x.type==='signature').length===before+1,'add: signature count +1');
   ok(str(b).indexOf('(MANGO LIME)')>=0,'add: new drink name in stream');
   ok((await PDFLib.PDFDocument.load(b)).getPageCount()===2,'add: still parses');
-  fs.writeFileSync('/private/tmp/claude-501/-Users-apple/dd29cd90-79fd-49fd-9b88-6e90a1b2a4c4/scratchpad/drinks_added.pdf', Buffer.from(b));
+  fs.writeFileSync(path.join(outDir(), 'drinks_added.pdf'), Buffer.from(b));
 
   // gradient sanity: mango -> warm (R>G>B on C1 dark end roughly), distinct from neutral
   const gm=H.gradientFor('mango passionfruit');

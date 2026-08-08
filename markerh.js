@@ -21,7 +21,9 @@ vm.runInContext(engine+";globalThis.__h={get removed(){return removed;},set remo
   if(!H.ready()){console.log("BOOT FAIL");process.exit(1);}
   for(const sc of SCEN){
     H.removed=new Set(); H.added={}; H.markerEdits={}; H.edits={}; H.badgeEdits={}; H.specialsEdits={};   // reset ALL state between scenarios
-    const pg = sc.page!=null? sc.page : H.FM.menu_pages[0];
+    // page-key schemas differ: capiche-surat/ahm use `menu_pages[]`, the Aiko drinks editor uses a
+    // singular `menu_page`. Reading only the first made this harness unable to boot /drinks/ at all.
+    const pg = sc.page!=null? sc.page : (H.FM.menu_pages ? H.FM.menu_pages[0] : H.FM.menu_page);
     (sc.removed||[]).forEach(idx=> H.removed.add(pg+":"+idx));
     if(sc.markers) for(const k in sc.markers) H.markerEdits[pg+":"+k]=sc.markers[k];
     if(sc.badges) for(const k in sc.badges) H.badgeEdits[pg+":"+k]=sc.badges[k];

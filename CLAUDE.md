@@ -111,9 +111,15 @@ Also fetched per editor: `base_words.json` (generic English spell dictionary, re
 3. **PDFs must stay uncompressed** when (re)built — pikepdf save with
    `compress_streams=False, stream_decode_level=generalized`, object streams disabled. A FlateDecoded
    content stream breaks every byte span.
-4. **AUDIT AS A VIEWER before calling anything done.** Render the exported PDF with pymupdf and read
-   it like a customer — overlaps, wrong prices, dropped letters, typos, mis-placed markers. Don't
-   ship on reasoning alone. (`import fitz` → `page.get_pixmap()`.)
+4. **AUDIT AS A VIEWER before calling anything done.** Render the exported PDF and read it like a
+   customer — overlaps, wrong prices, dropped letters, typos, mis-placed markers. Don't ship on
+   reasoning alone. Two routes, use whichever you have:
+   - **Node (no Python needed):** `test/lib/render.mjs` — `renderPages()` / `renderRegion()` /
+     `textLines()`, backed by the `mupdf` devDependency. Just `npm install`.
+   - **Python:** `import fitz` → `page.get_pixmap()` (needs `pip3 install pymupdf`).
+
+   Byte-level checks alone are NOT sufficient: the ADD-font corruption produced perfectly valid
+   bytes and visibly broken glyphs, and survived because nothing in the suite rasterised anything.
 5. **Build for ALL brands.** A requested feature applies to every relevant editor; code stays
    per-editor (separate files) but the interface is identical. Drinks editors come as a set (Aiko,
    Capiche Surat, Capiche Ahmedabad) — do all of them.
@@ -139,10 +145,24 @@ already in the repo are enough to *edit* today):
 - Design source files (PDF/.ai) come from the **design team**; they're not in this repo. The latest
   food blueprint is in `incoming/`.
 
-**Test (headless harnesses — boot an engine in jsdom+vm, write a PDF, then render with pymupdf):**
+**Test.** Start with the suite, then reach for a harness to reproduce one case:
+
+- **`npm test`** — regression suite (`test/regress.js`). Renders as well as diffing bytes, and pins
+  the known bugs as declared **KNOWN-FAIL** cases, so the run is green-except-known. `FULL=1 npm test`
+  adds the exhaustive per-dish removal sweeps. When a fix lands its case flips to PASS and the suite
+  tells you to delete the declaration from `KNOWN` in `test/regress.js`.
+- Artefacts (renders, exported PDFs, fixtures) go to `test-output/` — gitignored, override with
+  `CHUCKY_TEST_OUT`. Never hard-code an output path into a harness.
+
+**Harnesses** (boot an engine in jsdom+vm, write a PDF):
 - `node foodh.js <editor_dir> <out.pdf> '<EDITS_json>' ['<MARKERS_json>']`  (env `PERSONA` for cover)
-- `node foodh_ar.js …` — same, plus add/remove via env `REMOVED` / `ADDED`
-- `node markerh.js …` (drinks markers) · `node framh.js …` (drinks photo framing)
+- `node foodh_ar.js …` — same, plus add/remove/reorder via env `REMOVED` / `ADDED` / `ORDER`
+  (only this one wires `ORDER`; `foodh.js` ignores it)
+- `node markerh.js …` (drinks markers, all three drinks editors) · `node framh.js …` (photo framing;
+  generates its own 4-quadrant fixture, override with `FRAME_JPEG`)
+- `node churndh.js <out.pdf> '<EDITS_json>'` — Churn'd. It needs its own harness: its fieldmap uses
+  `items[]` not `fields[]`, so the food harnesses can never boot it. Edit keys are `n<id>` / `p<id>_<col>`.
+- `node src/drinks/harness_bands.js` — Aiko drinks (band-model rebuild), 14 assertions.
 - If you add code calling `requestAnimationFrame`, harnesses need a rAF stub (framh.js has one).
 - **Preview caveat:** the in-browser live preview loads pdf.js from a CDN; some sandboxes block that
   worker so preview hangs — environmental, not a data bug. The deployed site loads it fine.
