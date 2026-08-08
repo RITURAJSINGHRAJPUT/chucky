@@ -234,6 +234,60 @@ const EDITORS = [
     return [!missing.length, missing.length ? 'missing: ' + missing.join(', ') : 'all six'];
   });
 
+  // ---- 11b. category (section heading) editing -------------------------------------------------
+  // Each heading is a serif name + a gold handwritten label, both real text. The label also has a
+  // stroked VECTOR copy of itself painted on top, which must be removed or the new word renders
+  // over the old one — and `flourish_cm` points inside that overlay, so emitting both ops corrupts
+  // the stream. Assert on the RENDER: new words present, old words gone.
+  await guard('aiko: category name + decorative label are editable', async () => {
+    const fm = JSON.parse(fs.readFileSync(path.join(ED('aiko'), 'fieldmap.json'), 'utf8'));
+    const heads = fm.fields.filter(f => f.role === 'header' && f.kind === 'serif');
+    const bad = [];
+    for (const sf of heads) {
+      const lf = fm.fields.find(q => q.id === sf.pair);
+      // replacements must come from each font's own subset — see the charset note below
+      const nv = sf.display === 'Noodles' ? 'Sides' : 'Noodles';
+      const lv = lf.display === 'hearty' ? 'sweet' : 'hearty';
+      const e = {}; e[sf.id] = nv; e[lf.id] = lv;
+      const out = outFile(`aiko_cat_${sf.id.replace(':', '_')}.pdf`, 'regress');
+      food('aiko', out, e);
+      const L = R.textLines(out, sf.page);
+      if (!L.some(l => l.text.includes(nv))) bad.push(`${sf.label}: new name missing`);
+      if (!L.some(l => l.text.includes(lv))) bad.push(`${sf.label}: new label missing`);
+      if (L.some(l => l.text.trim() === sf.display)) bad.push(`${sf.label}: old name still rendered`);
+      if (L.some(l => l.text.trim() === lf.display)) bad.push(`${sf.label}: old label still rendered (vector overlay?)`);
+      fs.unlinkSync(out);
+    }
+    return [!bad.length, bad.length ? bad.slice(0, 2).join('; ') : `${heads.length} pairs`];
+  });
+
+  // The category fonts are SUBSETS holding only the glyphs the artwork already uses, so most
+  // realistic renames are unrepresentable. Pin the ceiling so nobody "fixes" a rename by writing
+  // characters the font cannot draw.
+  await guard('aiko: category fonts are subsets and the limit is declared', async () => {
+    const fm = JSON.parse(fs.readFileSync(path.join(ED('aiko'), 'fieldmap.json'), 'utf8'));
+    const serif = fm.fields.find(f => f.role === 'header' && f.kind === 'serif');
+    const script = fm.fields.find(f => f.role === 'header' && f.kind === 'script');
+    const noP = serif.charset.indexOf('P') < 0;          // "Small Plates" is impossible
+    const noSpace = script.charset.indexOf(' ') < 0;     // "TO SHARE" is impossible
+    const declared = !!serif.charset && !!script.charset && !!serif.widths;
+    return [noP && noSpace && declared,
+      `serif=${JSON.stringify(serif.charset)} script=${JSON.stringify(script.charset)}`];
+  });
+
+  // ---- 12. bug-report API + dashboard security -------------------------------------------------
+  // These have their own runners (they need jsdom / module loading); fold their verdicts in here so
+  // `npm test` is the single gate.
+  for (const [name, script] of [['bug API input clamps', 'test/bugapi.test.mjs'],
+                                ['/bugs/ dashboard neutralises hostile records', 'test/bugsdash.test.mjs']]) {
+    await guard(name, async () => {
+      try { const o = run(script, []); const m = /(\d+) passed, (\d+) failed/.exec(o);
+            return [m && m[2] === '0', m ? `${m[1]} passed, ${m[2]} failed` : 'no summary line']; }
+      catch (e) { const o = String(e.stdout || e.message); const m = /(\d+) passed, (\d+) failed/.exec(o);
+                  return [false, m ? `${m[1]} passed, ${m[2]} failed` : String(e.message).slice(0, 90)]; }
+    });
+  }
+
   // ---- summary ---------------------------------------------------------------------------------
   const n = s => results.filter(r => r.status === s).length;
   console.log('-'.repeat(64));
