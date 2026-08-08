@@ -50,6 +50,9 @@ header.bar{display:flex;align-items:center;gap:16px;padding:10px 18px;border-bot
 .pill::before{content:"";width:7px;height:7px;border-radius:50%;background:currentColor}
 .pill.ok{color:var(--ok);border-color:rgba(95,176,124,.4);background:rgba(95,176,124,.08)}
 .pill.bad{color:var(--bad);border-color:rgba(229,103,94,.45);background:rgba(229,103,94,.1)}
+#fullprev{background:transparent;color:var(--cream,#F4ECDD);border:1px solid var(--line2,rgba(244,236,221,.2));font-weight:600;letter-spacing:.02em;padding:9px 14px;border-radius:9px;font-size:13px;transition:.15s;margin-right:8px}
+#fullprev:hover:not(:disabled){border-color:var(--aiko-line,rgba(237,28,36,.42))}
+#fullprev:disabled{opacity:.5;cursor:default}
 #export{background:var(--aiko);color:#1a1400;font-weight:700;letter-spacing:.03em;padding:9px 16px;border-radius:9px;font-size:13px;transition:.15s}
 #export:hover{filter:brightness(1.07);transform:translateY(-1px)}
 #export:disabled{opacity:.4;cursor:not-allowed;transform:none;filter:none}
@@ -229,6 +232,7 @@ input.volu:focus{border-color:var(--aiko-line)}
   <div class="spacer"></div>
   <span id="flagpill" class="pill ok">All clear</span>
   <button class="prevtoggle" onclick="togglePrev()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:15px;height:15px"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M14 4v16"/></svg>Preview</button>
+  <button id="fullprev" title="Open the current menu full-size in a new tab">Full Preview ↗</button>
   <button id="export">Export PDF</button>
 </header>
 <main class="app">
@@ -515,6 +519,40 @@ function buildEditor(){
   if(typeof syncRail==='function') syncRail();
 }
 document.querySelectorAll('.tabs button').forEach(b=>b.addEventListener('click',()=>{ document.querySelectorAll('.tabs button').forEach(x=>x.classList.remove('on')); b.classList.add('on'); activePage=+b.dataset.pg; document.getElementById('ptag').textContent='— '+(activePage===FM.menu_page?'Menu':'Cover'); buildEditor(); renderPreview(); }));
+/* ---- FULL-PAGE PREVIEW HANDOFF --------------------------------------------------------------
+   Opens /preview/ in a new tab showing the ACTUAL current PDF. There is NO second generator here:
+   this calls the same regenerate() that Export calls, so the preview and the exported file are the
+   same bytes. The PDF reaches the viewer through IndexedDB (same-origin, client-only) — it never
+   enters the URL, never hits the network and is never uploaded. The record is one-shot: the viewer
+   deletes it the moment it loads, and sweeps anything stale.
+   The tab is opened SYNCHRONOUSLY, before the await — opening it afterwards makes the browser treat
+   it as a pop-up and block it. */
+const PV_DB='chucky_preview', PV_STORE='jobs';
+const PV_FILE=(typeof BRAND!=='undefined'&&BRAND&&BRAND.download)?BRAND.download:'Aiko_Drinks_Menu.pdf';
+const PV_TITLE="Aiko — Drinks";
+function pvDB(){ return new Promise((res,rej)=>{ const r=indexedDB.open(PV_DB,1);
+  r.onupgradeneeded=()=>{ if(!r.result.objectStoreNames.contains(PV_STORE)) r.result.createObjectStore(PV_STORE); };
+  r.onsuccess=()=>res(r.result); r.onerror=()=>rej(r.error); }); }
+function pvPut(id,rec){ return pvDB().then(d=>new Promise((res,rej)=>{
+  const tx=d.transaction(PV_STORE,'readwrite'); tx.objectStore(PV_STORE).put(rec,id);
+  tx.oncomplete=()=>res(); tx.onerror=()=>rej(tx.error); })); }
+async function openFullPreview(){
+  const btn=document.getElementById('fullprev');
+  const id='job_'+Date.now()+'_'+Math.random().toString(36).slice(2,8);
+  const win=window.open('/preview/#'+id,'_blank');            // sync: must precede any await
+  const label=btn?btn.textContent:'';
+  if(btn){ btn.disabled=true; btn.textContent='Preparing\u2026'; }
+  try{
+    const bytes=await regenerate();
+    await pvPut(id,{ bytes:(bytes instanceof Uint8Array)?bytes:new Uint8Array(bytes),
+                     file:PV_FILE, title:PV_TITLE, back:location.pathname, t:Date.now() });
+    if(!win) alert('Your browser blocked the preview tab.\nAllow pop-ups for this site, then press \u201cFull Preview\u201d again.');
+  }catch(e){
+    try{ await pvPut(id,{error:String((e&&e.message)||e), t:Date.now()}); }catch(_){}
+    if(!win) alert('Could not build the preview: '+((e&&e.message)||e));
+  }finally{ if(btn){ btn.disabled=false; btn.textContent=label||'Full Preview \u2197'; } }
+}
+(function(){ const b=document.getElementById('fullprev'); if(b) b.addEventListener('click', openFullPreview); })();   // guarded: a missing button must never kill the engine
 document.getElementById('export').addEventListener('click', async()=>{ const bytes=await regenerate(); const blob=new Blob([bytes],{type:'application/pdf'}); const url=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url; a.download=BRAND.download; a.click(); URL.revokeObjectURL(url); try{MEM.snapshot('export');}catch(_){} showChucky(BRAND.download); });
 const CHUCKY_SVG='<svg viewBox="0 0 220 220" fill="none" stroke="currentColor" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round">'
 +'<path d="M58 188 C22 188 24 156 48 158" fill="#fff"/>'
