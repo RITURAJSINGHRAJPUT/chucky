@@ -54,6 +54,13 @@ header.bar{display:flex;align-items:center;gap:16px;padding:10px 18px;border-bot
 #fullprev{background:transparent;color:var(--cream,#F4ECDD);border:1px solid var(--line2,rgba(244,236,221,.2));font-weight:600;letter-spacing:.02em;padding:9px 14px;border-radius:9px;font-size:13px;transition:.15s;margin-right:8px}
 #fullprev:hover:not(:disabled){border-color:var(--aiko-line,rgba(237,28,36,.42))}
 #fullprev:disabled{opacity:.5;cursor:default}
+#pstage{position:relative;display:inline-block;line-height:0;max-width:100%}
+#hitlayer{position:absolute;inset:0;pointer-events:none;z-index:1}
+.hitbox{position:absolute;pointer-events:auto;cursor:pointer;border-radius:4px;transition:background .12s,box-shadow .12s}
+.hitbox:hover{background:var(--aiko-soft);box-shadow:inset 0 0 0 1.5px var(--aiko-line)}
+.hitbox.sel{background:var(--aiko-soft);box-shadow:inset 0 0 0 1.5px var(--aiko-line)}
+.card.flash{animation:cardflash 1.15s ease-out}
+@keyframes cardflash{0%,100%{box-shadow:0 0 0 0 transparent}18%{box-shadow:0 0 0 2px var(--aiko)}}
 #export{background:var(--aiko);color:#1a1400;font-weight:700;letter-spacing:.03em;padding:9px 16px;border-radius:9px;font-size:13px;transition:.15s}
 #export:hover{filter:brightness(1.07);transform:translateY(-1px)}
 #export:disabled{opacity:.4;cursor:not-allowed;transform:none;filter:none}
@@ -342,6 +349,67 @@ async function regenerate(){
   lastBytes = await doc.save({useObjectStreams:false}); try{MEM.tick();}catch(_){}
   return lastBytes;
 }
+/* ---------- click the preview to edit ----------
+   Invisible boxes over the rendered page (in PERCENT, so they hold at any preview scale).
+   Churn'd prints each item TWICE (mirrored columns), so every item gets a box per copy;
+   both jump to the same editor card. Boxes follow the add/remove reflow. */
+let _pvSel=null;
+function pvHitLayer(){
+  const cv=document.getElementById('preview'); if(!cv) return null;
+  let st=document.getElementById('pstage');
+  if(!st){ st=document.createElement('div'); st.id='pstage';
+    cv.parentNode.insertBefore(st,cv); st.appendChild(cv);
+    const hl=document.createElement('div'); hl.id='hitlayer'; st.appendChild(hl); }
+  return st.querySelector('#hitlayer');
+}
+function pvBoxes(p){
+  if(p!==FM.menu_page) return [];
+  const rh=FM.row_h||20.9;
+  const removedYs=[...removed].map(id=>FM.items[id].row_y);
+  const insertYs=added.map(a=>FM.sections[a.sec].add.last_y);
+  const shiftFor=y=>{ let s=0;
+    for(const ry of removedYs) if(ry> y+0.05) s+=rh;
+    for(const iy of insertYs) if(iy> y+0.05) s-=rh;
+    return s; };
+  const out=[];
+  FM.sections.forEach(sec=>{
+    const sz=(sec.add&&sec.add.name_size)||12.5;
+    const pxs=(sec.add&&sec.add.price_x)||[];
+    const lastPx=pxs.length? pxs[pxs.length-1] : null;
+    for(const idx of sec.items){
+      const it=FM.items[idx]; if(removed.has(it.id)||it.row_y==null) continue;
+      const y=it.row_y+shiftFor(it.row_y);
+      (it.name_x||[]).forEach((nx,k)=>{
+        const right = lastPx? lastPx[k]+26 : nx+240;
+        out.push({id:it.id, x0:nx-6, x1:right, top:y+sz*0.86, bot:y-(rh-sz*0.86)});
+      });
+    }
+  });
+  return out;
+}
+function pvSync(){
+  const hl=pvHitLayer(); if(!hl) return;
+  let boxes; try{ boxes=pvBoxes(activePage); }catch(e){ hl.innerHTML=''; return; }
+  const sz=(FM.page_sizes&&FM.page_sizes[activePage])||[841.89,595.28], W=sz[0], H=sz[1];
+  hl.innerHTML='';
+  for(const b of boxes){
+    const d=document.createElement('div');
+    d.className='hitbox'+(_pvSel===b.id?' sel':'');
+    d.style.left=(b.x0/W*100)+'%'; d.style.width=(Math.max(10,b.x1-b.x0)/W*100)+'%';
+    d.style.top=((H-b.top)/H*100)+'%'; d.style.height=(Math.max(8,b.top-b.bot)/H*100)+'%';
+    d.title='Click to edit this item';
+    d.addEventListener('click',()=>pvJump(b.id));
+    hl.appendChild(d);
+  }
+}
+function pvJump(id){
+  _pvSel=id; pvSync();
+  const card=document.querySelector('#editor .card[data-key="i'+id+'"]');
+  if(!card) return;
+  card.scrollIntoView({behavior:'smooth', block:'center'});
+  card.classList.remove('flash'); void card.offsetWidth; card.classList.add('flash');
+  const f=card.querySelector('input.name'); if(f) setTimeout(()=>f.focus(),260);
+}
 async function renderPreview(){
   const my=++renderToken; document.getElementById('busy').classList.add('on');
   const bytes = lastBytes || await regenerate();
@@ -358,7 +426,7 @@ async function renderPreview(){
     cv.width=vp.width; cv.height=vp.height; cv.style.width=(vp.width/window.devicePixelRatio)+'px';
     await page.render({canvasContext:ctx, viewport:vp}).promise;
   }catch(e){ if(!(e&&(e.name==='RenderingCancelledException'||String(e.message||e).includes('Rendering cancelled')))) console.error(e); }
-  if(my===renderToken) document.getElementById('busy').classList.remove('on');
+  if(my===renderToken){ document.getElementById('busy').classList.remove('on'); try{ pvSync(); }catch(_){} }
 }
 let ptimer=null;
 function schedulePreview(){ clearTimeout(ptimer); ptimer=setTimeout(async()=>{ await regenerate(); renderPreview(); },340); }

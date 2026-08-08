@@ -71,6 +71,13 @@ header.bar{display:flex;align-items:center;gap:16px;padding:10px 18px;border-bot
 #fullprev{background:transparent;color:var(--cream,#F4ECDD);border:1px solid var(--line2,rgba(244,236,221,.2));font-weight:600;letter-spacing:.02em;padding:9px 14px;border-radius:9px;font-size:13px;transition:.15s;margin-right:8px}
 #fullprev:hover:not(:disabled){border-color:var(--aiko-line,rgba(237,28,36,.42))}
 #fullprev:disabled{opacity:.5;cursor:default}
+#pstage{position:relative;display:inline-block;line-height:0;max-width:100%}
+#hitlayer{position:absolute;inset:0;pointer-events:none;z-index:1}
+.hitbox{position:absolute;pointer-events:auto;cursor:pointer;border-radius:4px;transition:background .12s,box-shadow .12s}
+.hitbox:hover{background:var(--aiko-soft);box-shadow:inset 0 0 0 1.5px var(--aiko-line)}
+.hitbox.sel{background:var(--aiko-soft);box-shadow:inset 0 0 0 1.5px var(--aiko-line)}
+.card.flash{animation:cardflash 1.15s ease-out}
+@keyframes cardflash{0%,100%{box-shadow:0 0 0 0 transparent}18%{box-shadow:0 0 0 2px var(--aiko)}}
 #export{background:var(--aiko);color:#1a1400;font-weight:700;letter-spacing:.03em;padding:9px 16px;border-radius:9px;font-size:13px;transition:.15s}
 #export:hover{filter:brightness(1.07);transform:translateY(-1px)}
 #export:disabled{opacity:.4;cursor:not-allowed;transform:none;filter:none}
@@ -1054,6 +1061,64 @@ async function regenerate(){
   lastBytes = await doc.save({useObjectStreams:false}); try{MEM.tick();}catch(_){}
   return lastBytes;
 }
+/* ---------- click the preview to edit ----------
+   Invisible boxes are laid over the rendered page, positioned in PERCENT of the page so they
+   stay aligned at any preview scale / window size. Clicking one scrolls to that dish's card in
+   the editor and focuses it. Boxes follow the removal reflow, so they track what's on screen. */
+let _pvSel=null;
+function pvHitLayer(){
+  const cv=document.getElementById('preview'); if(!cv) return null;
+  let st=document.getElementById('pstage');
+  if(!st){                                   // wrap the canvas once so the overlay hugs it exactly
+    st=document.createElement('div'); st.id='pstage';
+    cv.parentNode.insertBefore(st,cv); st.appendChild(cv);
+    const hl=document.createElement('div'); hl.id='hitlayer'; st.appendChild(hl);
+  }
+  return st.querySelector('#hitlayer');
+}
+// one box per visible dish on page p, in PDF space (y up), reflow included
+function pvBoxes(p){
+  const st=structuralForPage(p, pageStreams[p].pristine), slots=st.removedSlots||[];
+  const rise=(x,y)=>{ let s=0; for(const rs of slots){ if(x>=rs.cmin && x<rs.cmax && y<=rs.y-Math.abs(rs.h)/2) s+=Math.abs(rs.h); } return s; };
+  const out=[];
+  for(const it of itemsForPage(p).items){
+    if(removed.has(it.name.id)) continue;
+    const n=it.name, sz=n.size||13, nL=(n.lines||[]).length||1;
+    const top = n.y + sz*0.95 + rise(n.x,n.y);
+    let bot = n.y - (nL-1)*15.5 - 5 + rise(n.x,n.y);
+    if(it.desc){ const dl=(it.desc.line_spans||[]).length||1; bot = it.desc.y - (dl-1)*9.0 - 3 + rise(it.desc.x,it.desc.y); }
+    let right = n.x + 235;
+    if(it.prices && it.prices.length){ const pr=it.prices[it.prices.length-1];
+      right = pr.x + String(pr.text||'').length*(ADV.price||0.63)*(pr.size||8) + 5; }
+    out.push({id:n.id, x0:n.x-6, x1:right, top, bot});
+  }
+  return out;
+}
+function pvSync(){
+  const hl=pvHitLayer(); if(!hl) return;
+  let boxes; try{ boxes=pvBoxes(activePage); }catch(e){ hl.innerHTML=''; return; }
+  const sz=(PAGES&&PAGES[activePage])||[841.89,595.276], W=sz[0], H=sz[1];
+  hl.innerHTML='';
+  for(const b of boxes){
+    const d=document.createElement('div');
+    d.className='hitbox'+(_pvSel===b.id?' sel':'');
+    d.style.left  = (b.x0/W*100)+'%';
+    d.style.width = (Math.max(10,b.x1-b.x0)/W*100)+'%';
+    d.style.top   = ((H-b.top)/H*100)+'%';
+    d.style.height= (Math.max(8,b.top-b.bot)/H*100)+'%';
+    d.title='Click to edit this item';
+    d.addEventListener('click',()=>pvJump(b.id));
+    hl.appendChild(d);
+  }
+}
+function pvJump(id){
+  _pvSel=id; pvSync();
+  const el=document.querySelector('#editor [data-id="'+(window.CSS&&CSS.escape?CSS.escape(id):id)+'"]');
+  const card=el?el.closest('.card'):null; if(!card) return;
+  card.scrollIntoView({behavior:'smooth', block:'center'});
+  card.classList.remove('flash'); void card.offsetWidth; card.classList.add('flash');
+  if(el&&el.isContentEditable) setTimeout(()=>el.focus(),260);
+}
 async function renderPreview(){
   const my = ++renderToken;
   document.getElementById('busy').classList.add('on');
@@ -1075,7 +1140,7 @@ async function renderPreview(){
     canvas.style.width=(vp.width/window.devicePixelRatio)+'px';
     await page.render({canvasContext:ctx, viewport:vp}).promise;
   }catch(e){ if(!(e&&(e.name==='RenderingCancelledException'||String(e.message||e).includes('Rendering cancelled')))) console.error(e); }
-  if(my===renderToken) document.getElementById('busy').classList.remove('on');
+  if(my===renderToken){ document.getElementById('busy').classList.remove('on'); try{ pvSync(); }catch(_){} }
 }
 
 // ---------- spell + glyph ----------

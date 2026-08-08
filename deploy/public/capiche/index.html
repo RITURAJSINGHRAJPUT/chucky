@@ -71,6 +71,13 @@ header.bar{display:flex;align-items:center;gap:16px;padding:10px 18px;border-bot
 #fullprev{background:transparent;color:var(--cream,#F4ECDD);border:1px solid var(--line2,rgba(244,236,221,.2));font-weight:600;letter-spacing:.02em;padding:9px 14px;border-radius:9px;font-size:13px;transition:.15s;margin-right:8px}
 #fullprev:hover:not(:disabled){border-color:var(--aiko-line,rgba(237,28,36,.42))}
 #fullprev:disabled{opacity:.5;cursor:default}
+#pstage{position:relative;display:inline-block;line-height:0;max-width:100%}
+#hitlayer{position:absolute;inset:0;pointer-events:none;z-index:1}
+.hitbox{position:absolute;pointer-events:auto;cursor:pointer;border-radius:4px;transition:background .12s,box-shadow .12s}
+.hitbox:hover{background:var(--aiko-soft);box-shadow:inset 0 0 0 1.5px var(--aiko-line)}
+.hitbox.sel{background:var(--aiko-soft);box-shadow:inset 0 0 0 1.5px var(--aiko-line)}
+.card.flash{animation:cardflash 1.15s ease-out}
+@keyframes cardflash{0%,100%{box-shadow:0 0 0 0 transparent}18%{box-shadow:0 0 0 2px var(--aiko)}}
 #export{background:var(--aiko);color:#1a1400;font-weight:700;letter-spacing:.03em;padding:9px 16px;border-radius:9px;font-size:13px;transition:.15s}
 #export:hover{filter:brightness(1.07);transform:translateY(-1px)}
 #export:disabled{opacity:.4;cursor:not-allowed;transform:none;filter:none}
@@ -494,6 +501,33 @@ function spliceBytes(src, ops){
   const out=new Uint8Array(outLen); let si=0, oi=0;
   for(const o of ops){ out.set(src.subarray(si,o.s),oi); oi+=o.s-si; out.set(o.rep,oi); oi+=o.rep.length; si=o.e; }
   out.set(src.subarray(si),oi); return out;
+}
+// A deletion must never weld the byte before it to the byte after it: `Q`+`q` becomes the
+// bogus operator `Qq`, and every PDF parser then abandons the REST of the content stream
+// (dishes below simply vanish). Pad the replacement with a newline when it would weld.
+// This matters most where a delete span does NOT land on an operator boundary — the divider/badge
+// carve splits spans mid-stream, and keepFont() legitimately returns '' when no state needs
+// restoring, so the two ends can meet directly.
+function safeDel(p, s, e, rep){
+  const t=pageText(p);
+  const before = s>0 ? t[s-1] : '\n', after = e<t.length ? t[e] : '\n';
+  let out = rep||'';
+  if(out==='') return (/\S/.test(before) && /\S/.test(after)) ? '\n' : '';
+  if(/\S/.test(before) && /\S/.test(out[0])) out='\n'+out;
+  if(/\S/.test(out[out.length-1]) && /\S/.test(after)) out=out+'\n';
+  return out;
+}
+// same weld guard for ops whose replacement is already encoded (divider / badge repositioning)
+function safeOp(p, o){
+  const t=pageText(p), nb=c=>/\S/.test(c||'');
+  const before = o.s>0 ? t[o.s-1] : '\n', after = o.e<t.length ? t[o.e] : '\n';
+  if(!o.rep.length) return (nb(before)&&nb(after)) ? {s:o.s,e:o.e,rep:enc('\n')} : o;
+  const pre  = (nb(before) && nb(String.fromCharCode(o.rep[0]))) ? '\n' : '';
+  const post = (nb(String.fromCharCode(o.rep[o.rep.length-1])) && nb(after)) ? '\n' : '';
+  if(!pre && !post) return o;
+  const a=enc(pre), b=enc(post), m=new Uint8Array(a.length+o.rep.length+b.length);
+  m.set(a,0); m.set(o.rep,a.length); m.set(b,a.length+o.rep.length);
+  return {s:o.s, e:o.e, rep:m};
 }
 
 /* ---------- structural reflow (add/remove) ---------- */
@@ -1009,15 +1043,15 @@ async function regenerate(){
     // preserve vanished and survivors inherited an older fill (dish black -> chrome black).
     // keepFont is therefore computed over the MERGED range, never per original span.
     dels = mergeSpans(dels);
-    for(const d of dels) ops.push({s:d[0],e:d[1],rep:enc(keepFont(d,p))});
+    for(const d of dels) ops.push({s:d[0],e:d[1],rep:enc(safeDel(p,d[0],d[1],keepFont(d,p)))});
     if(dels.length){
       ops = ops.filter(o=> !dels.some(d=> d[0]<=o.s && o.e<=d[1] && !(o.s===d[0]&&o.e===d[1])) );
     }
-    for(const o of dividerOps(divs, st.removedSlots)) ops.push(o);   // reposition/delete each divider by its own Y
-    for(const o of bdg.ops) ops.push(o);   // delete removed items' NEW badges + ride survivors up by their own Y
-    for(const sp of mkDelSpans) ops.push({s:sp[0],e:sp[1],rep:enc(keepFont(sp,p))});   // strip edited dishes' baked markers (restamped below)
+    for(const o of dividerOps(divs, st.removedSlots)) ops.push(safeOp(p,o));   // reposition/delete each divider by its own Y
+    for(const o of bdg.ops) ops.push(safeOp(p,o));   // delete removed items' NEW badges + ride survivors up by their own Y
+    for(const sp of mkDelSpans) ops.push({s:sp[0],e:sp[1],rep:enc(safeDel(p,sp[0],sp[1],keepFont(sp,p)))});   // strip edited dishes' baked markers (restamped below)
     const pc=personaCover(p);   // personalised cover: hide any `del` spans, stamp occasion + guest
-    for(const sp of pc.del){ ops.push({s:sp[0],e:sp[1],rep:enc(keepFont(sp,p))}); }
+    for(const sp of pc.del){ ops.push({s:sp[0],e:sp[1],rep:enc(safeDel(p,sp[0],sp[1],keepFont(sp,p)))}); }
     let edited = ops.length ? spliceBytes(ps.pristine, ops) : ps.pristine;
     const addStr = appendedForPage(p, st.removedSlots) + mkAppend + pc.add;
     if(addStr){ const ab=enc(addStr); const m=new Uint8Array(edited.length+ab.length); m.set(edited,0); m.set(ab,edited.length); edited=m; }
@@ -1026,6 +1060,64 @@ async function regenerate(){
   }
   lastBytes = await doc.save({useObjectStreams:false}); try{MEM.tick();}catch(_){}
   return lastBytes;
+}
+/* ---------- click the preview to edit ----------
+   Invisible boxes are laid over the rendered page, positioned in PERCENT of the page so they
+   stay aligned at any preview scale / window size. Clicking one scrolls to that dish's card in
+   the editor and focuses it. Boxes follow the removal reflow, so they track what's on screen. */
+let _pvSel=null;
+function pvHitLayer(){
+  const cv=document.getElementById('preview'); if(!cv) return null;
+  let st=document.getElementById('pstage');
+  if(!st){                                   // wrap the canvas once so the overlay hugs it exactly
+    st=document.createElement('div'); st.id='pstage';
+    cv.parentNode.insertBefore(st,cv); st.appendChild(cv);
+    const hl=document.createElement('div'); hl.id='hitlayer'; st.appendChild(hl);
+  }
+  return st.querySelector('#hitlayer');
+}
+// one box per visible dish on page p, in PDF space (y up), reflow included
+function pvBoxes(p){
+  const st=structuralForPage(p, pageStreams[p].pristine), slots=st.removedSlots||[];
+  const rise=(x,y)=>{ let s=0; for(const rs of slots){ if(x>=rs.cmin && x<rs.cmax && y<=rs.y-Math.abs(rs.h)/2) s+=Math.abs(rs.h); } return s; };
+  const out=[];
+  for(const it of itemsForPage(p).items){
+    if(removed.has(it.name.id)) continue;
+    const n=it.name, sz=n.size||13, nL=(n.lines||[]).length||1;
+    const top = n.y + sz*0.95 + rise(n.x,n.y);
+    let bot = n.y - (nL-1)*15.5 - 5 + rise(n.x,n.y);
+    if(it.desc){ const dl=(it.desc.line_spans||[]).length||1; bot = it.desc.y - (dl-1)*9.0 - 3 + rise(it.desc.x,it.desc.y); }
+    let right = n.x + 235;
+    if(it.prices && it.prices.length){ const pr=it.prices[it.prices.length-1];
+      right = pr.x + String(pr.text||'').length*(ADV.price||0.63)*(pr.size||8) + 5; }
+    out.push({id:n.id, x0:n.x-6, x1:right, top, bot});
+  }
+  return out;
+}
+function pvSync(){
+  const hl=pvHitLayer(); if(!hl) return;
+  let boxes; try{ boxes=pvBoxes(activePage); }catch(e){ hl.innerHTML=''; return; }
+  const sz=(PAGES&&PAGES[activePage])||[841.89,595.276], W=sz[0], H=sz[1];
+  hl.innerHTML='';
+  for(const b of boxes){
+    const d=document.createElement('div');
+    d.className='hitbox'+(_pvSel===b.id?' sel':'');
+    d.style.left  = (b.x0/W*100)+'%';
+    d.style.width = (Math.max(10,b.x1-b.x0)/W*100)+'%';
+    d.style.top   = ((H-b.top)/H*100)+'%';
+    d.style.height= (Math.max(8,b.top-b.bot)/H*100)+'%';
+    d.title='Click to edit this item';
+    d.addEventListener('click',()=>pvJump(b.id));
+    hl.appendChild(d);
+  }
+}
+function pvJump(id){
+  _pvSel=id; pvSync();
+  const el=document.querySelector('#editor [data-id="'+(window.CSS&&CSS.escape?CSS.escape(id):id)+'"]');
+  const card=el?el.closest('.card'):null; if(!card) return;
+  card.scrollIntoView({behavior:'smooth', block:'center'});
+  card.classList.remove('flash'); void card.offsetWidth; card.classList.add('flash');
+  if(el&&el.isContentEditable) setTimeout(()=>el.focus(),260);
 }
 async function renderPreview(){
   const my = ++renderToken;
@@ -1048,7 +1140,7 @@ async function renderPreview(){
     canvas.style.width=(vp.width/window.devicePixelRatio)+'px';
     await page.render({canvasContext:ctx, viewport:vp}).promise;
   }catch(e){ if(!(e&&(e.name==='RenderingCancelledException'||String(e.message||e).includes('Rendering cancelled')))) console.error(e); }
-  if(my===renderToken) document.getElementById('busy').classList.remove('on');
+  if(my===renderToken){ document.getElementById('busy').classList.remove('on'); try{ pvSync(); }catch(_){} }
 }
 
 // ---------- spell + glyph ----------
