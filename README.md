@@ -5,6 +5,7 @@ were solved — read the relevant one before touching that area.
 
 | File | Covers |
 |------|--------|
+| `chucky-current-state.md` | **Verified snapshot of the system as it stands** — architecture, all six editors, feature matrix, the four fieldmap schemas, deployment, preview, test coverage, known bugs, live/local divergence, security risks, recommended order of work. Read this second. |
 | `chucky-aiko-editor.md` | The whole system: editor shell, byte-level method, Aiko/Capiche/Churn'd food editors, divider engine, allergen icon sizing, section grouping. Start here. |
 | `capiche-food-rebuild.md` | How to adopt a **new food blueprint PDF** with `src/capiche/build_food.js` (the reconstructed builder), plus all the parsing/marker/max_chars gotchas. |
 | `capiche-drinks-editors.md` | Capiche Surat + Ahmedabad drinks editors: build pipeline, add/remove, markers, photo crop, named versions, deploy notes. Long but thorough. |

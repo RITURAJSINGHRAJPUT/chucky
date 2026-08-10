@@ -68,6 +68,16 @@ header.bar{display:flex;align-items:center;gap:16px;padding:10px 18px;border-bot
 .cropbtn:hover{border-color:var(--aiko);color:var(--cream,#F4ECDD)}
 .cropbtn.save{background:var(--aiko);color:#1a1400;border-color:var(--aiko);font-weight:700}
 .cropbtn.ghost{color:var(--muted,#8F8676)}
+#fullprev{background:transparent;color:var(--cream,#F4ECDD);border:1px solid var(--line2,rgba(244,236,221,.2));font-weight:600;letter-spacing:.02em;padding:9px 14px;border-radius:9px;font-size:13px;transition:.15s;margin-right:8px}
+#fullprev:hover:not(:disabled){border-color:var(--aiko-line,rgba(237,28,36,.42))}
+#fullprev:disabled{opacity:.5;cursor:default}
+#pstage{position:relative;display:inline-block;line-height:0;max-width:100%}
+#hitlayer{position:absolute;inset:0;pointer-events:none;z-index:1}
+.hitbox{position:absolute;pointer-events:auto;cursor:pointer;border-radius:4px;transition:background .12s,box-shadow .12s}
+.hitbox:hover{background:var(--aiko-soft);box-shadow:inset 0 0 0 1.5px var(--aiko-line)}
+.hitbox.sel{background:var(--aiko-soft);box-shadow:inset 0 0 0 1.5px var(--aiko-line)}
+.card.flash{animation:cardflash 1.15s ease-out}
+@keyframes cardflash{0%,100%{box-shadow:0 0 0 0 transparent}18%{box-shadow:0 0 0 2px var(--aiko)}}
 #export{background:var(--aiko);color:#1a1400;font-weight:700;letter-spacing:.03em;padding:9px 16px;border-radius:9px;font-size:13px;transition:.15s}
 #export:hover{filter:brightness(1.07);transform:translateY(-1px)}
 #export:disabled{opacity:.4;cursor:not-allowed;transform:none;filter:none}
@@ -245,6 +255,7 @@ main.app{display:grid;grid-template-columns:210px 1fr minmax(400px,560px);height
   <span id="flagpill" class="pill ok">All clear</span>
   <button class="prevtoggle" onclick="togglePrev()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:15px;height:15px"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M14 4v16"/></svg>Preview</button>
   <button id="persona" title="Add an occasion + guest name to the cover">✨ Personalise</button>
+  <button id="fullprev" title="Open the current menu full-size in a new tab">Full Preview ↗</button>
   <button id="export">Export PDF</button>
 </header>
 <main class="app">
@@ -490,6 +501,33 @@ function spliceBytes(src, ops){
   const out=new Uint8Array(outLen); let si=0, oi=0;
   for(const o of ops){ out.set(src.subarray(si,o.s),oi); oi+=o.s-si; out.set(o.rep,oi); oi+=o.rep.length; si=o.e; }
   out.set(src.subarray(si),oi); return out;
+}
+// A deletion must never weld the byte before it to the byte after it: `Q`+`q` becomes the
+// bogus operator `Qq`, and every PDF parser then abandons the REST of the content stream
+// (dishes below simply vanish). Pad the replacement with a newline when it would weld.
+// This matters most where a delete span does NOT land on an operator boundary — the divider/badge
+// carve splits spans mid-stream, and keepFont() legitimately returns '' when no state needs
+// restoring, so the two ends can meet directly.
+function safeDel(p, s, e, rep){
+  const t=pageText(p);
+  const before = s>0 ? t[s-1] : '\n', after = e<t.length ? t[e] : '\n';
+  let out = rep||'';
+  if(out==='') return (/\S/.test(before) && /\S/.test(after)) ? '\n' : '';
+  if(/\S/.test(before) && /\S/.test(out[0])) out='\n'+out;
+  if(/\S/.test(out[out.length-1]) && /\S/.test(after)) out=out+'\n';
+  return out;
+}
+// same weld guard for ops whose replacement is already encoded (divider / badge repositioning)
+function safeOp(p, o){
+  const t=pageText(p), nb=c=>/\S/.test(c||'');
+  const before = o.s>0 ? t[o.s-1] : '\n', after = o.e<t.length ? t[o.e] : '\n';
+  if(!o.rep.length) return (nb(before)&&nb(after)) ? {s:o.s,e:o.e,rep:enc('\n')} : o;
+  const pre  = (nb(before) && nb(String.fromCharCode(o.rep[0]))) ? '\n' : '';
+  const post = (nb(String.fromCharCode(o.rep[o.rep.length-1])) && nb(after)) ? '\n' : '';
+  if(!pre && !post) return o;
+  const a=enc(pre), b=enc(post), m=new Uint8Array(a.length+o.rep.length+b.length);
+  m.set(a,0); m.set(o.rep,a.length); m.set(b,a.length+o.rep.length);
+  return {s:o.s, e:o.e, rep:m};
 }
 
 /* ---------- structural reflow (add/remove) ---------- */
@@ -770,8 +808,8 @@ function flagBody(c){
 // Stamp a dish's marker set at its name-baseline anchor (bx0,Yb). Mirrors the baked packing:
 // absolute per-icon offsets from add_const, so a re-stamp lands exactly where the originals were.
 function stampMarkers(bx0, Yb, set, page){
-  const C=AC, F=C.fonts, IC=C.ink_color; let out='';
-  const jf=(FM.jfont_by_page&&FM.jfont_by_page[page])||F.j;   // AOMonoBold resource name differs per page
+  const C=AC, F=pageFonts(page), IC=C.ink_color; let out='';
+  const jf=F.j;   // AOMonoBold resource name differs per page (pageFonts folds in jfont_by_page)
   const OFF={dairy:C.icon_dairy,gluten:C.icon_gluten,jain:C.icon_j,spicy:C.icon_spicy,korea:C.icon_korea,new:C.icon_badge};
   const spDx = set.has('jain') ? 17.79 : 12.0;   // flame packs after J when Jain present, else tighter (matches baked)
   for(const t of MARKER_TYPES){
@@ -785,13 +823,43 @@ function stampMarkers(bx0, Yb, set, page){
   }
   return out;
 }
+/* ---- PER-PAGE FONT RESOURCES ----------------------------------------------------------------
+   Font resource names (/T1_0, /TT2 …) are PAGE-LOCAL in PDF: the same name means different fonts on
+   different pages. `add_const.fonts` is a single global map, so an added dish was stamped with page
+   1's names wherever it landed. On page 0 that made `/T1_0` — a serif face with an incompatible
+   encoding — render the description as "TOMATO, <notdef>SIL, MOZZARELLA" instead of "TOMATO, BASIL,
+   MOZZARELLA". The bytes were valid; only the glyphs were wrong, which is why no byte-level test
+   caught it.
+   The codebase already knew this for one glyph — `FM.jfont_by_page` exists for exactly this reason —
+   so this generalises that idea to name/desc/price by reading the resource the page's OWN baked
+   fields use. Falls back to add_const.fonts when a page has no baked field of that role. */
+const _pgFonts={};
+function pageFonts(p){
+  if(_pgFonts[p]) return _pgFonts[p];
+  const F=AC.fonts, out={name:F.name, desc:F.desc, price:F.price, j:F.j};
+  const t=pageText(p);
+  const firstOff=f=> f.lines ? (f.lines[0]&&f.lines[0][0]&&f.lines[0][0][0])
+                  : f.line_spans ? (f.line_spans[0]&&f.line_spans[0][0])
+                  : (f.tj_span&&f.tj_span[0]);
+  for(const role of ['name','desc','price']){
+    const f=FM.fields.find(q=>q.page===p&&q.role===role);
+    const off=f&&firstOff(f); if(off==null) continue;
+    // scan the WHOLE prefix, not a fixed window: Illustrator sets a font once and draws a long run
+    // under it, so on some pages the nearest `Tf` is thousands of bytes back (a 400-byte window
+    // finds nothing there and silently falls back to the wrong global).
+    const m=(t.slice(0,off).match(/\/[A-Za-z0-9_]+ 1 Tf/g)||[]).pop();
+    if(m) out[role]=m.replace(/ 1 Tf$/,'');
+  }
+  out.j=(FM.jfont_by_page&&FM.jfont_by_page[p])||out.j;
+  return _pgFonts[p]=out;
+}
 function addItemHeight(it,sec){ // total vertical space this item needs (name + desc lines)
   const dl=wrapDesc((it.desc||'').toUpperCase(), 56, 2).lines.filter(Boolean).length;
   return Math.max(sec.slot, 24 + (dl-1)*9.0);
 }
 function buildItemJS(it, sec, Y){
   const NX=sec.col_x, SZ=sec.name_size||13, adv=0.63*SZ;   // exact AO-Mono advance (630/1000 em)
-  const C=AC, F=C.fonts, NC=C.name_color, IC=C.ink_color;
+  const C=AC, F=pageFonts(sec.page), NC=C.name_color, IC=C.ink_color;   // page-local resources, NOT the global map
   const DDY=(sec.desc_dy!=null?sec.desc_dy:C.desc_dy);
   const nm=(it.name||'').toUpperCase();
   let p=[];
@@ -1005,15 +1073,15 @@ async function regenerate(){
     // preserve vanished and survivors inherited an older fill (dish black -> chrome black).
     // keepFont is therefore computed over the MERGED range, never per original span.
     dels = mergeSpans(dels);
-    for(const d of dels) ops.push({s:d[0],e:d[1],rep:enc(keepFont(d,p))});
+    for(const d of dels) ops.push({s:d[0],e:d[1],rep:enc(safeDel(p,d[0],d[1],keepFont(d,p)))});
     if(dels.length){
       ops = ops.filter(o=> !dels.some(d=> d[0]<=o.s && o.e<=d[1] && !(o.s===d[0]&&o.e===d[1])) );
     }
-    for(const o of dividerOps(divs, st.removedSlots)) ops.push(o);   // reposition/delete each divider by its own Y
-    for(const o of bdg.ops) ops.push(o);   // delete removed items' NEW badges + ride survivors up by their own Y
-    for(const sp of mkDelSpans) ops.push({s:sp[0],e:sp[1],rep:enc(keepFont(sp,p))});   // strip edited dishes' baked markers (restamped below)
+    for(const o of dividerOps(divs, st.removedSlots)) ops.push(safeOp(p,o));   // reposition/delete each divider by its own Y
+    for(const o of bdg.ops) ops.push(safeOp(p,o));   // delete removed items' NEW badges + ride survivors up by their own Y
+    for(const sp of mkDelSpans) ops.push({s:sp[0],e:sp[1],rep:enc(safeDel(p,sp[0],sp[1],keepFont(sp,p)))});   // strip edited dishes' baked markers (restamped below)
     const pc=personaCover(p);   // personalised cover: hide any `del` spans, stamp occasion + guest
-    for(const sp of pc.del){ ops.push({s:sp[0],e:sp[1],rep:enc(keepFont(sp,p))}); }
+    for(const sp of pc.del){ ops.push({s:sp[0],e:sp[1],rep:enc(safeDel(p,sp[0],sp[1],keepFont(sp,p)))}); }
     let edited = ops.length ? spliceBytes(ps.pristine, ops) : ps.pristine;
     const addStr = appendedForPage(p, st.removedSlots) + mkAppend + pc.add;
     if(addStr){ const ab=enc(addStr); const m=new Uint8Array(edited.length+ab.length); m.set(edited,0); m.set(ab,edited.length); edited=m; }
@@ -1022,6 +1090,64 @@ async function regenerate(){
   }
   lastBytes = await doc.save({useObjectStreams:false}); try{MEM.tick();}catch(_){}
   return lastBytes;
+}
+/* ---------- click the preview to edit ----------
+   Invisible boxes are laid over the rendered page, positioned in PERCENT of the page so they
+   stay aligned at any preview scale / window size. Clicking one scrolls to that dish's card in
+   the editor and focuses it. Boxes follow the removal reflow, so they track what's on screen. */
+let _pvSel=null;
+function pvHitLayer(){
+  const cv=document.getElementById('preview'); if(!cv) return null;
+  let st=document.getElementById('pstage');
+  if(!st){                                   // wrap the canvas once so the overlay hugs it exactly
+    st=document.createElement('div'); st.id='pstage';
+    cv.parentNode.insertBefore(st,cv); st.appendChild(cv);
+    const hl=document.createElement('div'); hl.id='hitlayer'; st.appendChild(hl);
+  }
+  return st.querySelector('#hitlayer');
+}
+// one box per visible dish on page p, in PDF space (y up), reflow included
+function pvBoxes(p){
+  const st=structuralForPage(p, pageStreams[p].pristine), slots=st.removedSlots||[];
+  const rise=(x,y)=>{ let s=0; for(const rs of slots){ if(x>=rs.cmin && x<rs.cmax && y<=rs.y-Math.abs(rs.h)/2) s+=Math.abs(rs.h); } return s; };
+  const out=[];
+  for(const it of itemsForPage(p).items){
+    if(removed.has(it.name.id)) continue;
+    const n=it.name, sz=n.size||13, nL=(n.lines||[]).length||1;
+    const top = n.y + sz*0.95 + rise(n.x,n.y);
+    let bot = n.y - (nL-1)*15.5 - 5 + rise(n.x,n.y);
+    if(it.desc){ const dl=(it.desc.line_spans||[]).length||1; bot = it.desc.y - (dl-1)*9.0 - 3 + rise(it.desc.x,it.desc.y); }
+    let right = n.x + 235;
+    if(it.prices && it.prices.length){ const pr=it.prices[it.prices.length-1];
+      right = pr.x + String(pr.text||'').length*(ADV.price||0.63)*(pr.size||8) + 5; }
+    out.push({id:n.id, x0:n.x-6, x1:right, top, bot});
+  }
+  return out;
+}
+function pvSync(){
+  const hl=pvHitLayer(); if(!hl) return;
+  let boxes; try{ boxes=pvBoxes(activePage); }catch(e){ hl.innerHTML=''; return; }
+  const sz=(PAGES&&PAGES[activePage])||[841.89,595.276], W=sz[0], H=sz[1];
+  hl.innerHTML='';
+  for(const b of boxes){
+    const d=document.createElement('div');
+    d.className='hitbox'+(_pvSel===b.id?' sel':'');
+    d.style.left  = (b.x0/W*100)+'%';
+    d.style.width = (Math.max(10,b.x1-b.x0)/W*100)+'%';
+    d.style.top   = ((H-b.top)/H*100)+'%';
+    d.style.height= (Math.max(8,b.top-b.bot)/H*100)+'%';
+    d.title='Click to edit this item';
+    d.addEventListener('click',()=>pvJump(b.id));
+    hl.appendChild(d);
+  }
+}
+function pvJump(id){
+  _pvSel=id; pvSync();
+  const el=document.querySelector('#editor [data-id="'+(window.CSS&&CSS.escape?CSS.escape(id):id)+'"]');
+  const card=el?el.closest('.card'):null; if(!card) return;
+  card.scrollIntoView({behavior:'smooth', block:'center'});
+  card.classList.remove('flash'); void card.offsetWidth; card.classList.add('flash');
+  if(el&&el.isContentEditable) setTimeout(()=>el.focus(),260);
 }
 async function renderPreview(){
   const my = ++renderToken;
@@ -1044,7 +1170,7 @@ async function renderPreview(){
     canvas.style.width=(vp.width/window.devicePixelRatio)+'px';
     await page.render({canvasContext:ctx, viewport:vp}).promise;
   }catch(e){ if(!(e&&(e.name==='RenderingCancelledException'||String(e.message||e).includes('Rendering cancelled')))) console.error(e); }
-  if(my===renderToken) document.getElementById('busy').classList.remove('on');
+  if(my===renderToken){ document.getElementById('busy').classList.remove('on'); try{ pvSync(); }catch(_){} }
 }
 
 // ---------- spell + glyph ----------
@@ -1332,6 +1458,40 @@ function updateGate(){
   if(total===0){ pill.className='pill ok'; pill.textContent='All clear'+(spBase?' \u00b7 '+spBase+' word'+(spBase>1?'s':'')+' to review':''); ex.disabled=false; }
   else{ pill.className='pill bad'; const b=[]; if(sp)b.push(sp+' spelling'); if(gl)b.push(gl+' font'); if(pe)b.push(pe+' price'); if(ov)b.push(ov+' too long'); pill.textContent=b.join(' · ')+' to fix'; ex.disabled=true; }
 }
+/* ---- FULL-PAGE PREVIEW HANDOFF --------------------------------------------------------------
+   Opens /preview/ in a new tab showing the ACTUAL current PDF. There is NO second generator here:
+   this calls the same regenerate() that Export calls, so the preview and the exported file are the
+   same bytes. The PDF reaches the viewer through IndexedDB (same-origin, client-only) — it never
+   enters the URL, never hits the network and is never uploaded. The record is one-shot: the viewer
+   deletes it the moment it loads, and sweeps anything stale.
+   The tab is opened SYNCHRONOUSLY, before the await — opening it afterwards makes the browser treat
+   it as a pop-up and block it. */
+const PV_DB='chucky_preview', PV_STORE='jobs';
+const PV_FILE=(typeof BRAND!=='undefined'&&BRAND&&BRAND.download)?BRAND.download:'Capiche_Menu.pdf';
+const PV_TITLE="Capiche — Food";
+function pvDB(){ return new Promise((res,rej)=>{ const r=indexedDB.open(PV_DB,1);
+  r.onupgradeneeded=()=>{ if(!r.result.objectStoreNames.contains(PV_STORE)) r.result.createObjectStore(PV_STORE); };
+  r.onsuccess=()=>res(r.result); r.onerror=()=>rej(r.error); }); }
+function pvPut(id,rec){ return pvDB().then(d=>new Promise((res,rej)=>{
+  const tx=d.transaction(PV_STORE,'readwrite'); tx.objectStore(PV_STORE).put(rec,id);
+  tx.oncomplete=()=>res(); tx.onerror=()=>rej(tx.error); })); }
+async function openFullPreview(){
+  const btn=document.getElementById('fullprev');
+  const id='job_'+Date.now()+'_'+Math.random().toString(36).slice(2,8);
+  const win=window.open('/preview/#'+id,'_blank');            // sync: must precede any await
+  const label=btn?btn.textContent:'';
+  if(btn){ btn.disabled=true; btn.textContent='Preparing\u2026'; }
+  try{
+    const bytes=await regenerate();
+    await pvPut(id,{ bytes:(bytes instanceof Uint8Array)?bytes:new Uint8Array(bytes),
+                     file:PV_FILE, title:PV_TITLE, back:location.pathname, t:Date.now() });
+    if(!win) alert('Your browser blocked the preview tab.\nAllow pop-ups for this site, then press \u201cFull Preview\u201d again.');
+  }catch(e){
+    try{ await pvPut(id,{error:String((e&&e.message)||e), t:Date.now()}); }catch(_){}
+    if(!win) alert('Could not build the preview: '+((e&&e.message)||e));
+  }finally{ if(btn){ btn.disabled=false; btn.textContent=label||'Full Preview \u2197'; } }
+}
+(function(){ const b=document.getElementById('fullprev'); if(b) b.addEventListener('click', openFullPreview); })();   // guarded: a missing button must never kill the engine
 document.getElementById('export').addEventListener('click', async ()=>{
   const bytes=await regenerate();
   const blob=new Blob([bytes],{type:'application/pdf'}); const url=URL.createObjectURL(blob);

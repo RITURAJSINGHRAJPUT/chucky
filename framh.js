@@ -22,7 +22,9 @@ const H=ctx.__h;
 (async()=>{
   for(let i=0;i<500&&!H.ready();i++)await new Promise(r=>setTimeout(r,25));
   if(!H.ready()){console.log("BOOT FAIL");process.exit(1);}
-  const bytes=fs.readFileSync('/tmp/frame_test.jpg');
+  // 4-quadrant fixture, generated on demand — this used to read '/tmp/frame_test.jpg', a file that
+  // is not in the repo, so a clean checkout failed with an ENOENT that looked like a code bug.
+  const bytes=fs.readFileSync(process.env.FRAME_JPEG || await require('./test/lib/fixture').frameTestJpeg());
   const file={type:'image/jpeg', arrayBuffer:async()=>bytes.buffer.slice(bytes.byteOffset,bytes.byteOffset+bytes.byteLength)};
   await H.embedPhoto(KEY, file);
   const up=H.photoUploads[KEY];

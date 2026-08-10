@@ -54,6 +54,16 @@ header.bar{display:flex;align-items:center;gap:16px;padding:10px 18px;border-bot
 #savemenu{background:transparent;color:var(--cream);border:1px solid var(--line2);font-weight:600;letter-spacing:.03em;padding:9px 15px;border-radius:9px;font-size:13px;transition:.15s;margin-right:8px}
 #savemenu:hover{border-color:var(--aiko-line);color:var(--aiko)}
 #savemenu:disabled{opacity:.6;cursor:default}
+#fullprev{background:transparent;color:var(--cream,#F4ECDD);border:1px solid var(--line2,rgba(244,236,221,.2));font-weight:600;letter-spacing:.02em;padding:9px 14px;border-radius:9px;font-size:13px;transition:.15s;margin-right:8px}
+#fullprev:hover:not(:disabled){border-color:var(--aiko-line,rgba(237,28,36,.42))}
+#fullprev:disabled{opacity:.5;cursor:default}
+#pstage{position:relative;display:inline-block;line-height:0;max-width:100%}
+#hitlayer{position:absolute;inset:0;pointer-events:none;z-index:1}
+.hitbox{position:absolute;pointer-events:auto;cursor:pointer;border-radius:4px;transition:background .12s,box-shadow .12s}
+.hitbox:hover{background:var(--aiko-soft);box-shadow:inset 0 0 0 1.5px var(--aiko-line)}
+.hitbox.sel{background:var(--aiko-soft);box-shadow:inset 0 0 0 1.5px var(--aiko-line)}
+.card.flash{animation:cardflash 1.15s ease-out}
+@keyframes cardflash{0%,100%{box-shadow:0 0 0 0 transparent}18%{box-shadow:0 0 0 2px var(--aiko)}}
 #export{background:var(--aiko);color:#1a1400;font-weight:700;letter-spacing:.03em;padding:9px 16px;border-radius:9px;font-size:13px;transition:.15s}
 #export:hover{filter:brightness(1.07);transform:translateY(-1px)}
 #export:disabled{opacity:.4;cursor:not-allowed;transform:none;filter:none}
@@ -281,6 +291,7 @@ input.volu:focus{border-color:var(--aiko-line)}
   <span class="chuckysay-anchor"></span>
   <div class="pill" id="flagpill">All clear</div>
   <button class="savebtn" id="savemenu" title="Save this version — it reopens next time with your photos">Save</button>
+  <button id="fullprev" title="Open the current menu full-size in a new tab">Full Preview ↗</button>
   <button class="export" id="export">Export PDF</button>
 </header>
 <main class="app">
@@ -508,19 +519,155 @@ function nameGeomOf(it, PT){                          // parse the baked name bl
   const tm = m? {s:bt+m.index, e:bt+m.index+m[0].length, txt:m[0], y:parseFloat(m[4])} : null;
   return it._ng={size, x0, topY:it.top_y, lead, tm};
 }
-/* How many lines this drink's NAME can occupy. Mirrors descCapacity: the baked spans, plus whatever
-   the row's free space (pitch - content_h) allows. A name CANNOT grow downward — the description's
-   Tm is baked ~10pt below the name baseline and a second line at -15.5pt would land on top of it —
-   so extra lines are stacked UPWARD, keeping the last line on the baked baseline (exactly how the
-   artwork's own two-line name, LEMON ICED TEA, is built). Practically this yields one extra line on
-   a 66.1pt row and none on the tight RED BULL / COKE rows. */
+/* The row budget below replaces an earlier local attempt that measured `pitch - content_h`.
+   That was wrong: content_h is a SYNTHETIC estimate the builder derives for add-slot maths
+   (reflow_data.py:109) -- a flat +10pt per row, +6 more for a description, both line heights
+   rounded up -- so on AHM MANGO PICANTE it claimed 49.6pt of content in a 66.1pt row while the
+   artwork really leaves 30.5pt clear above the name. `photo_tile` is the row TRUE box, which is
+   also where reflow_data.py:138-144 derives `pitch` from and where the divider rules are drawn. */
+/* ---- NAME FITTING (ported from production) ---------------------------------------------------
+   This subsystem shipped live on 2026-07-15 (ee8c6ef1) and never reached the repository, while the
+   repository grew its own answer to the same problem. Live's is adopted because it is production-
+   proven AND strictly richer: it wraps long names automatically instead of requiring the user to
+   type line breaks, reserves the marker cluster's width so a wrap cannot run under the icons, and
+   handles baked icons the fieldmap never captured. It already measured the row from `photo_tile`,
+   which is the same source of truth the local fix independently arrived at, so the two agree on
+   geometry and only differ in reach. The local `rowHeadroom`/`rowTopInk` pair is retired here.   */
+const NAME_ADV=0.6383;   // measured AO-Mono advance. 0.63 under-measures by ~1pt over 6 glyphs,
+                         // which pulled the marker cluster back INTO the last letter.
+const MIN_MARK_GAP=2.2;  // minimum visual clearance between a title and its first marker
+const ICON_LEFT_PAD=2.8; // dairy/gluten vectors paint ~2.8pt LEFT of their cm origin; without
+                         // this the leading icon lands back on the last letter of the title
+function bakedLastLine(it, PT){         // text of the baked final name line, for gap calibration
+  const sp=it.name_spans[it.name_spans.length-1];
+  const m=/^\((.*)\)Tj$/.exec(PT.slice(sp[0],sp[1]));
+  return m? m[1].replace(/\\([()\\])/g,'$1') : '';
+}
+/* Some drinks carry baked icons the fieldmap never captured (MANGO PICANTE's chillies, etc.): they
+   sit AFTER the J and are covered by no span, so a rename left them stranded on top of the new
+   name. Find them so they can ride along with the marker cluster. */
+function strayRowIcons(it, PT){
+  if(it._sri) return it._sri;
+  const band = it.photo_tile ? [it.photo_tile[1], it.photo_tile[1]+it.photo_tile[3]]
+                             : [it.top_y-50, it.top_y+20];
+  /* MERGE NOTE: live excluded only marker_span/dairy_span here, because live has no NEW-badge or
+     SPECIALS subsystem — that is unshipped local work. Locally those spans ARE deleted and
+     restamped, and the badge's own `cm` sits at x≈126 inside this scan window, so without excluding
+     them a badge is mistaken for a stray icon and gets an op inside a range that is also being
+     deleted. spliceBytes assumes non-overlapping ops, so that corrupted the stream from that point
+     on ("syntax error: unknown keyword" and every dish below vanishing). */
+  const covered=[it.marker_span, it.dairy_span, it.badge_span,
+                 it.specials_span, it.specials_text_span, it.photo_span].filter(Boolean);
+  const re=/q\s+1 0 0 1 (-?[\d.]+) (-?[\d.]+) cm/g; let m; const out=[];
+  while(m=re.exec(PT)){
+    const x=+m[1], y=+m[2];
+    if(y<band[0]||y>band[1]||x<12||x>180) continue;
+    if(covered.some(sp=>sp[0]<=m.index&&m.index<sp[1])) continue;   // dairy/J are restamped already
+    out.push({x, y, numStart:m.index+m[0].indexOf(m[1]), numEnd:m.index+m[0].indexOf(m[1])+m[1].length});
+  }
+  return it._sri=out;
+}
+// widest x the marker cluster reaches, relative to the baked name end — reserved when wrapping
+function markerReserve(it, PT, g){
+  const icons=strayRowIcons(it,PT);
+  const bakedRight=g.x0+bakedLastLine(it,PT).replace(/\s+$/,'').length*NAME_ADV*g.size;
+  let far=(it.mk_anchor? it.mk_anchor[0] : bakedRight)+4;
+  for(const ic of icons) far=Math.max(far, ic.x+5);
+  return Math.max(0, far-bakedRight);
+}
+// Locate the x-number inside a baked span so it can be nudged in place.
+function numSpanIn(PT, span, re){
+  const seg=PT.slice(span[0],span[1]); const m=re.exec(seg);
+  if(!m) return null;
+  const i=span[0]+m.index+m[0].indexOf(m[1]);
+  return {s:i, e:i+m[1].length, v:parseFloat(m[1])};
+}
+/* The artwork packs a few markers hard against the title (Surat's COLADA clears the "A" by 0.65pt,
+   so it reads as overlapping). Where the baked gap is under MIN_MARK_GAP, slide the whole baked
+   cluster right — icons AND the J AND any stray badge — leaving everything else as-is. */
+function tidyMarkerOps(it, PT, sh){
+  if(!it.name_spans || !it.name_spans.length) return [];
+  const g=nameGeomOf(it,PT);
+  const nameEnd=g.x0+bakedLastLine(it,PT).replace(/\s+$/,'').length*NAME_ADV*g.size;
+  const parts=[];
+  if(it.dairy_span){ const n=numSpanIn(PT,it.dairy_span,/q 1 0 0 1 (-?[\d.]+) /); if(n) parts.push({n, vis:n.v-ICON_LEFT_PAD}); }
+  if(it.marker_span){ const n=numSpanIn(PT,it.marker_span,/[\d.]+ 0 0 [\d.]+ (-?[\d.]+) -?[\d.]+ Tm/); if(n) parts.push({n, vis:n.v}); }
+  for(const ic of strayRowIcons(it,PT)) parts.push({n:{s:ic.numStart,e:ic.numEnd,v:ic.x}, vis:ic.x-ICON_LEFT_PAD});
+  if(!parts.length) return [];
+  const gap=Math.min.apply(null,parts.map(p=>p.vis))-nameEnd;
+  if(!(gap<MIN_MARK_GAP)) return [];
+  const d=MIN_MARK_GAP-gap;
+  return parts.map(p=>({s:p.n.s, e:p.n.e, rep:enc(num(p.n.v+d))}));
+}
+/* How many lines this drink's NAME can show: extra lines grow UPWARD from the baked last line,
+   bounded by the row's own top (the photo band), so they never touch the row above. */
+function nameRoom(it, g){
+  const B=it.name_spans.length, lh=Math.abs(g.lead)*g.size;
+  const rowTop = it.photo_tile ? it.photo_tile[1]+it.photo_tile[3]
+                               : (it.top_y!=null ? it.top_y+(it.pitch||FM.row_h||60)-14 : null);
+  if(rowTop==null) return Math.max(B,1);
+  const bakedBaseY = g.topY-(B-1)*lh;
+  const extra = Math.floor((rowTop - bakedBaseY - g.size*0.78)/lh);
+  return Math.max(B, Math.min(3, B+Math.max(0,extra)));
+}
+// Wrap a name to the text column (the photo rail starts at x=181) without breaking words.
+function nameWrap(lines, g, maxLines, reserve){
+  const perLine=Math.max(4, Math.floor((176-g.x0-(reserve||0))/(NAME_ADV*g.size)));
+  const out=[];
+  for(const ln of lines){
+    if(ln.length<=perLine){ out.push(ln); continue; }
+    let cur='';
+    for(const w of ln.split(/\s+/).filter(Boolean)){
+      if(!cur) cur=w;
+      else if((cur+' '+w).length<=perLine) cur+=' '+w;
+      else { out.push(cur); cur=w; }
+    }
+    if(cur) out.push(cur);
+  }
+  // Never DROP text: if it needs more lines than the row can hold, fold the remainder into the
+  // last allowed line (it may run wide, and the card warns) rather than silently losing words.
+  const cap=Math.max(1,maxLines);
+  if(out.length>cap){ const tail=out.slice(cap-1).join(' '); return out.slice(0,cap-1).concat([tail]); }
+  return out;
+}
+// The name lines a drink will actually RENDER (explicit breaks + wrap, capped by room).
+function renderedNameLines(it, PT, raw){
+  const g=nameGeomOf(it,PT);
+  return nameWrap(nameLines(raw), g, nameRoom(it,g), markerReserve(it,PT,g));
+}
+// kept as the public name for "how many lines fit", now answered by nameRoom()
 function nameCapacity(it, PT){
   const B=(it.name_spans||[]).length; if(!B) return 0;
-  const g=nameGeomOf(it,PT), lineH=Math.abs(g.lead)*g.size;
-  const free=(it.pitch!=null&&it.content_h!=null)? it.pitch-it.content_h : 0;
-  return B + Math.max(0, Math.floor(free/lineH));
+  return nameRoom(it, nameGeomOf(it,PT));
 }
-// where the marker cluster starts for an EDITED name (after its true last line)
+/* The clamp in regenerate() and the warning in validate() need the same ceiling as nameRoom(), but
+   expressed in POINTS of upward rise rather than a line count — the block also rises when the
+   DESCRIPTION grows, which a line count cannot express.
+   One deliberate difference from live's nameRoom(): it reserves only cap height (`size*0.78`), but
+   the topmost ink on a row is usually not the name — the marker cluster and NEW badge ride the
+   first line `raise` above its baseline, and across these two menus `raise` runs 5.85-8.61pt, so a
+   J sits ~4pt higher than the letters it labels. Reserve whichever is taller, or a row that
+   saturates its budget pushes the J through the divider rule drawn at the tile top. Verified by
+   render; pinned by the MANGO PICANTE row-box regression case. */
+function nameRoomFree(it, PT){
+  const g=nameGeomOf(it,PT);
+  const rowTop = it.photo_tile ? it.photo_tile[1]+it.photo_tile[3]
+                               : (it.top_y!=null ? it.top_y+(it.pitch||FM.row_h||60)-14 : null);
+  if(rowTop==null || it.top_y==null)
+    return (it.pitch!=null&&it.content_h!=null)? it.pitch-it.content_h : 0;   // no tile -> old estimate
+  let asc=g.size*0.78;                                    // live's cap-height reserve
+  if(it.mk_anchor){
+    const B=(it.name_spans||[]).length, lh=Math.abs(g.lead)*g.size;
+    const raise=it.mk_anchor[1]-(it.top_y-(B-1)*lh);
+    asc=Math.max(asc, raise + 0.67*((FM.jmark&&FM.jmark.size)||g.size));
+  }
+  return (rowTop - asc) - g.topY;
+}
+/* Where the marker cluster starts for an EDITED name (after its true last line).
+   Local keeps the `y0` parameter — rowLayout() moves the whole block when the description changes
+   length, and the markers have to follow it — while adopting live's self-calibrated horizontal pad:
+   the distance between this drink's baked last line and its baked anchor IS the designer's intended
+   spacing, so reuse it at the new length instead of a fixed 2.4pt. */
 function editedNameAnchor(it, nl2, PT, y0){
   const g=nameGeomOf(it,PT), B=it.name_spans.length;
   const M=Math.min(nl2.length, Math.max(B, nameCapacity(it,PT)));   // grown names count too
@@ -530,7 +677,9 @@ function editedNameAnchor(it, nl2, PT, y0){
   const _top=(y0!=null?y0:g.topY);
   const baseY=_top-(Math.min(M,B)-1)*lh, bakedBaseY=g.topY-(B-1)*lh;
   const raise=(it.mk_anchor?it.mk_anchor[1]:bakedBaseY+5.9)-bakedBaseY;
-  return [ g.x0 + lastLen*0.63*g.size + 2.4, baseY+raise ];
+  const bakedRight=g.x0+bakedLastLine(it,PT).replace(/\s+$/,'').length*NAME_ADV*g.size;
+  const pad=Math.max(1.0, it.mk_anchor? (it.mk_anchor[0]-bakedRight) : 4.9);
+  return [ g.x0 + lastLen*NAME_ADV*g.size + pad, baseY+raise ];
 }
 /* ---- NEW BADGE placement -------------------------------------------------------------------
    The badge sits to the RIGHT of the whole marker cluster, so a marker edit moves it exactly like
@@ -543,7 +692,7 @@ function badgePlace(it, mp, idx, set, PT, y0){
   const C=FM.mk_const, P=FM.micons&&FM.micons.newbadge; if(!P) return null;
   const W=iconW(P);
   const nameEd=(K(mp,idx,'name') in edits);
-  const nl2=nameEd? nameLines(edits[K(mp,idx,'name')]) : null;
+  const nl2=nameEd? renderedNameLines(it,PT,edits[K(mp,idx,'name')]) : null;
   const a=nameEd? editedNameAnchor(it,nl2,PT,y0) : (it.mk_anchor||[9.15, it.top_y]);
   let x=a[0] + markerRunW(set) + (C.gap_badge!=null?C.gap_badge:3.23);
   // never let a long name push the badge under the photo column
@@ -634,7 +783,11 @@ function rowLayout(it, PT, nN, nD){
   const B=(it.name_spans||[]).length, D=(it.desc_spans||[]).length;
   const ng=nameGeomOf(it,PT), dg=it.desc_geom;
   const nlh=Math.abs(ng.lead)*ng.size;
-  if(!D||!dg) return {nameY0:ng.topY+(Math.max(1,nN)-1)*nlh, descY0:null, nlh:nlh, dlh:0};
+  // No description: the name itself owns the row's last line (the price rides it), so anchor on the
+  // baked name's LAST baseline exactly as the branch below does. `ng.topY` is its FIRST baseline —
+  // anchoring there made a baked 3-line name (RED BULL/GINGER ALE/PERRIER) report a 31pt rise for
+  // its own unchanged line count, which tripped the clamp on every rename of those rows.
+  if(!D||!dg) return {nameY0:(ng.topY-(B-1)*nlh)+(Math.max(1,nN)-1)*nlh, descY0:null, nlh:nlh, dlh:0};
   const dlh=Math.abs(dg.lead)*dg.size;
   const descLastY=dg.y0-(D-1)*dlh;                 // pinned: the price's own baseline
   const gap=(ng.topY-(B-1)*nlh)-dg.y0;             // baked name-to-description gap, per row
@@ -760,6 +913,16 @@ function spliceBytes(src, ops){ ops=ops.slice().sort((a,b)=>a.s-b.s); let L=src.
 
 async function regenerate(){
   const rowH=FM.row_h||60;
+  /* Has the user changed ANYTHING? Gates the baked-artwork tidy pass below, so a pristine export
+     stays byte-for-byte identical to the source PDF.
+     Test VALUES, not key presence: buildEditor() seeds reorder[page] with an identity permutation
+     for every page it draws, and added[page] can be an empty array — treating either as "edited"
+     made a no-op export nudge markers and lose byte identity. */
+  const _some = o => Object.values(o||{}).some(v => Array.isArray(v) ? v.length>0 : v!=null);
+  const _anyEdit = _some(edits) || _some(markerEdits) || _some(badgeEdits) ||
+                   _some(specialsEdits) || _some(photoUploads) || removed.size>0 ||
+                   Object.values(added||{}).some(a=>a&&a.length>0) ||
+                   Object.values(reorder||{}).some(r=>(r||[]).some((v,i)=>v!==i));
   for(const mp of FM.menu_pages){
     const ps=pageStreams[mp]; const pageData=FM.pages.find(p=>p.page===mp);
     const PT=new TextDecoder('latin1').decode(ps.pristine);
@@ -790,14 +953,14 @@ async function regenerate(){
       const dr=descRender(mp,origIdx,origIt);
       if(!nameEd && !dr) return;                       // untouched rows are never respliced
       const B=it.name_spans.length, ng=nameGeomOf(it,PT);
-      const typed=nameEd? nameLines(val(mp,origIdx,'name',origIt.name)) : null;
-      const nN=typed? Math.min(typed.length, Math.max(B, nameCapacity(it,PT))) : B;
+      const typed=nameEd? renderedNameLines(it,PT,val(mp,origIdx,'name',origIt.name)) : null;
+      let nN=typed? Math.min(typed.length, Math.max(B, nameCapacity(it,PT))) : B;   // `let`: the clamp below decrements it
       const nD=dr? dr.lines.filter(l=>l&&l.trim()).length : (it.desc_spans||[]).length;
       let L=rowLayout(it,PT,nN,nD);
-      // nameCapacity and descCapacity each measure the row's free space independently, so a grown
+      // nameCapacity and descCapacity each measure the row's headroom independently, so a grown
       // name AND a grown description can together rise past the row above. Merge name lines back
       // until the block fits rather than letting it collide.
-      const free=(it.pitch!=null&&it.content_h!=null)? it.pitch-it.content_h : 0;
+      const free=nameRoomFree(it,PT);
       let clamped=false;
       while(nN>1 && (L.nameY0-ng.topY)>free+0.5){ nN--; clamped=true; L=rowLayout(it,PT,nN,nD); }
       const dtm=descTmOf(it,PT);
@@ -881,7 +1044,7 @@ async function regenerate(){
             ops.push({s:sp[0],e:sp[1],rep:enc(rep)});
           });
         } else {
-          const nl=nameToSpans(nameLines(val(mp,origIdx,'name',origIt.name)), it.name_spans.length);
+          const nl=nameToSpans(renderedNameLines(it,PT,val(mp,origIdx,'name',origIt.name)), it.name_spans.length);
           it.name_spans.forEach((sp,i)=>ops.push({s:sp[0],e:sp[1],rep:enc('('+escPdf(nl[i]||'')+')Tj')}));
         }
       }
@@ -921,7 +1084,7 @@ async function regenerate(){
           // description emptied: the volume has no line to ride, so it sits straight after the
           // NAME's last line — the way RED BULL/GINGER ALE/PERRIER[300ML] is drawn natively
           const _ng2=nameGeomOf(it,PT);
-          const _nl=(_lay.typed||nameLines(origIt.name)).filter(Boolean);
+          const _nl=(_lay.typed||renderedNameLines(it,PT,origIt.name)).filter(Boolean);
           const _lastTxt=_nl[Math.min(_lay.nN,_nl.length)-1]||'';
           vp={ x:_ng2.x0 + _lastTxt.length*0.63*_ng2.size + 1.2,
                y:_lay.L.nameY0-(Math.max(1,_lay.nN)-1)*Math.abs(_ng2.lead)*_ng2.size };
@@ -945,6 +1108,19 @@ async function regenerate(){
       // uploaded photo -> draw over the drink's (shifted) tile; keyed by origIdx (photo belongs to the drink)
       const up=photoUploads[K0(mp,origIdx)];
       if(up&&it.photo_tile){ const t=it.photo_tile; append+=photoDrawOp(up,[t[0],t[1]+sh,t[2],t[3]]); }
+      // Baked markers packed too tight against the title get nudged clear (artwork fix). Only for
+      // rows we are NOT restamping below — a restamp already places the cluster from scratch — and
+      // only once the menu has been touched at all: an export with NO edits must stay byte-identical
+      // to the source, which is the cheapest corruption alarm this project has.
+      // MERGE NOTE: live could tidy any untouched row, but locally a row that REFLOWS has its
+      // marker `cm`/`Tm` numbers rewritten by the shift pass — the very numbers tidyMarkerOps
+      // rewrites. Two ops over one range corrupt the stream (spliceBytes assumes non-overlap), so
+      // a moving row keeps its baked spacing; the nudge is cosmetic and reflow is not.
+      if(_anyEdit && !sh && !(K(mp,origIdx,'name') in edits) && !(K0(mp,origIdx) in markerEdits) && !isReordered){
+        const _tidy=tidyMarkerOps(it, PT, sh)
+          .filter(t=>!ops.some(o=>o.s<t.e && o.e>t.s));   // belt-and-braces: never double-write a range
+        ops=ops.concat(_tidy);
+      }
       // markers ALWAYS sit under the whole title: restamp when name OR marker set changed, or reordered
       const _nameEd=(K(mp,origIdx,'name') in edits)||isReordered;
       const _mkEd=(K0(mp,origIdx) in markerEdits)||isReordered;
@@ -952,8 +1128,15 @@ async function regenerate(){
       if((_nameEd||_mkEd||_mvN)&&it.mk_anchor){
         const set=(K0(mp,origIdx) in markerEdits)?new Set(markerEdits[K0(mp,origIdx)]):drinkMarkerSet(mp,origIdx,origIt);
         const _lg=layout.get(idx), _ly=_lg?_lg.L.nameY0:null;
-        const a=_nameEd?editedNameAnchor(it,nameLines(val(mp,origIdx,'name',origIt.name)),PT,_ly):(_ly!=null?[it.mk_anchor[0],it.mk_anchor[1]+(_ly-nameGeomOf(it,PT).topY)]:it.mk_anchor);
+        const a=_nameEd?editedNameAnchor(it,renderedNameLines(it,PT,val(mp,origIdx,'name',origIt.name)),PT,_ly):(_ly!=null?[it.mk_anchor[0],it.mk_anchor[1]+(_ly-nameGeomOf(it,PT).topY)]:it.mk_anchor);
         append+=stampMarkers(a[0],a[1]+sh,set);
+        // Baked icons the fieldmap never captured (MANGO PICANTE's chillies, stray badges) sit after
+        // the J under no span, so a rename left them stranded on top of the new title. Ride them
+        // along by the same delta the cluster moved.
+        if(_nameEd){ const dx=a[0]-it.mk_anchor[0];
+          if(Math.abs(dx)>0.05) for(const ic of strayRowIcons(it,PT))
+            ops.push({s:ic.numStart, e:ic.numEnd, rep:enc(num(ic.x+dx))});
+        }
       }
       // ---- SPECIALS bar. Emitted AFTER photoDrawOp above so an upload can't bury it. ----
       if(drinkSpecials(mp,origIdx,origIt)&&(!it.specials_span||up)){
@@ -1013,6 +1196,67 @@ async function regenerate(){
   lastBytes=await doc.save({useObjectStreams:false}); try{MEM.tick();}catch(_){} return lastBytes;
 }
 function schedulePreview(){ clearTimeout(ptimer); ptimer=setTimeout(async()=>{ await regenerate(); renderPreview(); },320); }
+/* ---------- click the preview to edit ----------
+   Invisible boxes over the rendered page (positioned in PERCENT so they hold at any preview
+   scale). Clicking a drink scrolls to + highlights its card. Boxes follow the removal reflow. */
+let _pvSel=null;
+function pvHitLayer(){
+  const cv=document.getElementById('preview'); if(!cv) return null;
+  let st=document.getElementById('pstage');
+  if(!st){ st=document.createElement('div'); st.id='pstage';
+    cv.parentNode.insertBefore(st,cv); st.appendChild(cv);
+    const hl=document.createElement('div'); hl.id='hitlayer'; st.appendChild(hl); }
+  return st.querySelector('#hitlayer');
+}
+// one box per visible drink row on page p, in PDF space (y up). Rows TILE the page, so bands
+// are derived bottom-up from the photo grid — an item without a photo_tile (AHM's first row)
+// still gets a correct, non-overlapping band instead of an oversized guess.
+function pvBoxes(p){
+  const pd=FM.pages.find(x=>x.page===p); if(!pd) return [];
+  const rowH=FM.row_h||60;
+  const H=(FM.page_sizes&&FM.page_sizes[p])? FM.page_sizes[p][1] : 595.28;
+  const rmTops=[]; pd.items.forEach((it,idx)=>{ if(removed.has(K0(p,idx))&&it.top_y!=null) rmTops.push({y:it.top_y,pitch:(it.pitch||rowH)}); });
+  const rise=y=> rmTops.filter(t=> t.y>((y||0)+0.5)).reduce((a,t)=>a+t.pitch,0);
+  const band={}; let prevTop=0;
+  pd.items.map((it,idx)=>({it,idx})).filter(o=>o.it.top_y!=null)
+    .sort((a,b)=>a.it.top_y-b.it.top_y)                       // bottom of page first
+    .forEach(({it,idx})=>{
+      const t=it.photo_tile;
+      const bot = t? t[1] : prevTop;
+      const top = t? t[1]+t[3] : Math.min(H, bot+(it.pitch||rowH));
+      prevTop=Math.max(prevTop,top); band[idx]={bot,top,right:(t? t[0]+t[2] : 275)};
+    });
+  const out=[];
+  pd.items.forEach((it,idx)=>{
+    if(removed.has(K0(p,idx)) || !band[idx]) return;
+    const sh=rise(it.top_y), b=band[idx];
+    out.push({id:K0(p,idx), x0:5, x1:b.right, top:b.top+sh, bot:b.bot+sh});
+  });
+  return out;
+}
+function pvSync(){
+  const hl=pvHitLayer(); if(!hl) return;
+  let boxes; try{ boxes=pvBoxes(activePage); }catch(e){ hl.innerHTML=''; return; }
+  const sz=(FM.page_sizes&&FM.page_sizes[activePage])||[280.63,595.28], W=sz[0], H=sz[1];
+  hl.innerHTML='';
+  for(const b of boxes){
+    const d=document.createElement('div');
+    d.className='hitbox'+(_pvSel===b.id?' sel':'');
+    d.style.left=(b.x0/W*100)+'%'; d.style.width=(Math.max(10,b.x1-b.x0)/W*100)+'%';
+    d.style.top=((H-b.top)/H*100)+'%'; d.style.height=(Math.max(8,b.top-b.bot)/H*100)+'%';
+    d.title='Click to edit this drink';
+    d.addEventListener('click',()=>pvJump(b.id));
+    hl.appendChild(d);
+  }
+}
+function pvJump(key){
+  _pvSel=key; pvSync();
+  const card=document.querySelector('#editor .card[data-key="'+key+'"]');
+  if(!card) return;
+  card.scrollIntoView({behavior:'smooth', block:'center'});
+  card.classList.remove('flash'); void card.offsetWidth; card.classList.add('flash');
+  const f=card.querySelector('textarea.name,input.name'); if(f) setTimeout(()=>f.focus(),260);
+}
 async function renderPreview(){
   const my=++renderToken; document.getElementById('busy').classList.add('on');
   const bytes=lastBytes||await regenerate();
@@ -1026,7 +1270,7 @@ async function renderPreview(){
     cv.width=vp.width;cv.height=vp.height;cv.style.width=(vp.width/window.devicePixelRatio)+'px';
     await page.render({canvasContext:cx,viewport:vp}).promise;
   }catch(e){ if(!(e&&String(e.message||e).includes('ancelled'))) console.error(e); }
-  if(my===renderToken) document.getElementById('busy').classList.remove('on');
+  if(my===renderToken){ document.getElementById('busy').classList.remove('on'); try{ pvSync(); }catch(_){} }
 }
 function buildTabs(){ const t=document.getElementById('tabs'); t.innerHTML=''; FM.menu_pages.forEach((mp,i)=>{ const b=document.createElement('button'); b.dataset.pg=mp; b.textContent='Page '+(i+1); if(mp===activePage)b.classList.add('on'); b.onclick=()=>{ activePage=mp; buildEditor(); renderPreview(); }; t.appendChild(b); }); }
 function photoUploadBtn(key){
@@ -1397,13 +1641,15 @@ function validate(){
       // the volume (which rides the last description line) can run into it
       if(Math.abs(p.y-c.it.price_pos.y)<2 && p.x+w>c.it.price_pos.x-2){ over=true; msg+=' — volume hits the price'; }
     }
-    // a name can grow upward into the row's free space, but only so far — past nameCapacity the
-    // extra lines get merged back onto the last line rather than collide with the row above
+    // a name can grow upward into the row's headroom, but only so far — past nameCapacity the
+    // extra lines get merged back onto the last line rather than collide with the row above.
+    // Uses the SAME nameRoomFree() budget regenerate() clamps with, so the warning can never
+    // disagree with what the exported PDF actually does.
     if(pageStreams[activePage] && c.it.name_spans && c.it.name_spans.length){
       const _PTn=new TextDecoder('latin1').decode(pageStreams[activePage].pristine);
-      const _typed=nameLines(val(activePage,c.idx,'name',c.it.name)).filter(Boolean).length;
+      const _typed=renderedNameLines(c.it,_PTn,val(activePage,c.idx,'name',c.it.name)).filter(Boolean).length;
       const _nD=r? r.lines.filter(l=>l&&l.trim()).length : (c.it.desc_spans||[]).length;
-      const _free=(c.it.pitch!=null&&c.it.content_h!=null)? c.it.pitch-c.it.content_h : 0;
+      const _free=nameRoomFree(c.it,_PTn);
       const _ng=nameGeomOf(c.it,_PTn);
       let _fit=Math.max(1,_typed);
       while(_fit>1 && (rowLayout(c.it,_PTn,_fit,_nD).nameY0-_ng.topY)>_free+0.5) _fit--;
@@ -1423,6 +1669,40 @@ function validate(){
   else { pill.className='pill ok'; pill.textContent='All clear'; }
   document.getElementById('export').disabled=false;
 }
+/* ---- FULL-PAGE PREVIEW HANDOFF --------------------------------------------------------------
+   Opens /preview/ in a new tab showing the ACTUAL current PDF. There is NO second generator here:
+   this calls the same regenerate() that Export calls, so the preview and the exported file are the
+   same bytes. The PDF reaches the viewer through IndexedDB (same-origin, client-only) — it never
+   enters the URL, never hits the network and is never uploaded. The record is one-shot: the viewer
+   deletes it the moment it loads, and sweeps anything stale.
+   The tab is opened SYNCHRONOUSLY, before the await — opening it afterwards makes the browser treat
+   it as a pop-up and block it. */
+const PV_DB='chucky_preview', PV_STORE='jobs';
+const PV_FILE=(typeof BRAND!=='undefined'&&BRAND&&BRAND.download)?BRAND.download:'Capiche_Ahmedabad_Drinks.pdf';
+const PV_TITLE="Capiche Ahmedabad — Drinks";
+function pvDB(){ return new Promise((res,rej)=>{ const r=indexedDB.open(PV_DB,1);
+  r.onupgradeneeded=()=>{ if(!r.result.objectStoreNames.contains(PV_STORE)) r.result.createObjectStore(PV_STORE); };
+  r.onsuccess=()=>res(r.result); r.onerror=()=>rej(r.error); }); }
+function pvPut(id,rec){ return pvDB().then(d=>new Promise((res,rej)=>{
+  const tx=d.transaction(PV_STORE,'readwrite'); tx.objectStore(PV_STORE).put(rec,id);
+  tx.oncomplete=()=>res(); tx.onerror=()=>rej(tx.error); })); }
+async function openFullPreview(){
+  const btn=document.getElementById('fullprev');
+  const id='job_'+Date.now()+'_'+Math.random().toString(36).slice(2,8);
+  const win=window.open('/preview/#'+id,'_blank');            // sync: must precede any await
+  const label=btn?btn.textContent:'';
+  if(btn){ btn.disabled=true; btn.textContent='Preparing\u2026'; }
+  try{
+    const bytes=await regenerate();
+    await pvPut(id,{ bytes:(bytes instanceof Uint8Array)?bytes:new Uint8Array(bytes),
+                     file:PV_FILE, title:PV_TITLE, back:location.pathname, t:Date.now() });
+    if(!win) alert('Your browser blocked the preview tab.\nAllow pop-ups for this site, then press \u201cFull Preview\u201d again.');
+  }catch(e){
+    try{ await pvPut(id,{error:String((e&&e.message)||e), t:Date.now()}); }catch(_){}
+    if(!win) alert('Could not build the preview: '+((e&&e.message)||e));
+  }finally{ if(btn){ btn.disabled=false; btn.textContent=label||'Full Preview \u2197'; } }
+}
+(function(){ const b=document.getElementById('fullprev'); if(b) b.addEventListener('click', openFullPreview); })();   // guarded: a missing button must never kill the engine
 document.getElementById('export').addEventListener('click', async()=>{ const bytes=await regenerate(); const blob=new Blob([bytes],{type:'application/pdf'}); const url=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url; a.download=BRAND.download; a.click(); URL.revokeObjectURL(url); try{MEM.snapshot('export');}catch(_){} showChucky(BRAND.download); });
 // Save = keep this menu as a NAMED version (with its own photos) you can reopen/switch to later.
 document.getElementById('savemenu').addEventListener('click', async function(){

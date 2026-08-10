@@ -20,3 +20,6 @@ deploy/.wrangler/
 
 # Local Netlify folder
 .netlify
+
+# test artefacts (renders, exported PDFs, fixtures)
+test-output/

@@ -59,9 +59,23 @@ a.mono{color:var(--red);text-decoration:none}a.mono:hover{text-decoration:underl
 const API=''; let KEY=localStorage.getItem('chucky_bugkey')||''; let FILTER='all'; let BUGS=[];
 function askKey(){ const k=prompt('Enter the bug-queue key (BUG_KEY):', KEY||''); if(k){ KEY=k.trim(); localStorage.setItem('chucky_bugkey',KEY); } }
 if(!KEY) askKey();
-const esc=s=>String(s==null?'':s).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+/* Every field below arrives from POST /api/bug, which is PUBLIC and unauthenticated — treat all of
+   it as hostile. esc() must cover quotes too: without them, a value dropped into an attribute
+   (`href="${esc(b.url)}"`) closes the attribute and injects an event handler, which runs in the
+   operator's browser where chucky_bugkey lives in localStorage. */
+const esc=s=>String(s==null?'':s).replace(/[&<>"'`]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;','`':'&#96;'}[c]));
+// A snapshot must be an inline image and nothing else. Anything else (javascript:, data:text/html,
+// a bare string with a quote in it) is dropped rather than escaped — there is no legitimate case.
+const safeShot=s=>(typeof s==='string' && /^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/.test(s)) ? s : null;
+// Editor links must be ABSOLUTE http(s). Do NOT resolve against location.origin: with a base, any
+// string parses — `undefined` becomes https://host/bugs/undefined — so records with no url grew a
+// bogus "open editor" link, and a `javascript:`-looking path could be laundered into a real one.
+const safeUrl=u=>{ if(typeof u!=='string'||!u) return null;
+  try{ const x=new URL(u); return (x.protocol==='http:'||x.protocol==='https:') ? x.href : null; }
+  catch(_){ return null; } };
 function ago(t){ const s=(Date.now()-t)/1000; if(s<60)return'just now'; if(s<3600)return Math.floor(s/60)+'m ago'; if(s<86400)return Math.floor(s/3600)+'h ago'; return Math.floor(s/86400)+'d ago'; }
-function pill(st){ const m={'new':['p-new','new'],'fixed':['p-fixed','fixed'],'needs-auth':['p-auth','needs auth'],'triaged':['p-triaged','triaged']}[st]||['p-triaged',st]; return `<span class="pill ${m[0]}">${m[1]}</span>`; }
+// the fallback arm echoes an UNKNOWN status straight into markup, so escape it like any other field
+function pill(st){ const m={'new':['p-new','new'],'fixed':['p-fixed','fixed'],'needs-auth':['p-auth','needs auth'],'triaged':['p-triaged','triaged']}[st]||['p-triaged',esc(st)]; return `<span class="pill ${m[0]}">${m[1]}</span>`; }
 async function load(){
   const el=document.getElementById('list'); el.innerHTML='<div class="empty">Loading…</div>';
   try{
@@ -76,18 +90,21 @@ function render(){
   document.getElementById('count').textContent=`${rows.length} of ${BUGS.length}`;
   if(!rows.length){ el.innerHTML='<div class="empty">Nothing here. 🐟</div>'; return; }
   el.innerHTML=rows.map(b=>{
-    const shot=b.shot?`<img src="${b.shot}" data-full="${b.shot}" alt="snapshot">`:`<div class="no">no snapshot</div>`;
+    const _sh=safeShot(b.shot);
+    const shot=_sh?`<img src="${esc(_sh)}" data-full="${esc(_sh)}" alt="snapshot">`
+                  :`<div class="no">${b.shot?'snapshot rejected':'no snapshot'}</div>`;
+    const _url=safeUrl(b.url);
     const note=b.resolution?`<div class="note ${b.status==='needs-auth'?'auth':''}">${b.status==='needs-auth'?'⚠︎ Proposed fix — needs your OK\n':'✓ '}${esc(b.resolution)}</div>`:'';
     return `<div class="card">
       <div class="body">
-        <div class="top">${pill(b.status)}<span class="ed">${esc(b.editor||'?')}${b.page!=null?' · p'+b.page:''}</span><span class="when">${ago(b.t)}</span></div>
+        <div class="top">${pill(b.status)}<span class="ed">${esc(b.editor||'?')}${Number.isFinite(+b.page)?' · p'+(+b.page):''}</span><span class="when">${ago(b.t)}</span></div>
         <div class="desc">${esc(b.desc)}</div>
-        ${b.url?`<div class="meta"><a class="mono" href="${esc(b.url)}" target="_blank">open editor ↗</a></div>`:''}
+        ${_url?`<div class="meta"><a class="mono" href="${esc(_url)}" target="_blank" rel="noopener noreferrer">open editor ↗</a></div>`:''}
         ${note}
         <div class="acts">
-          ${b.status==='needs-auth'?`<button data-act="approve" data-id="${b.id}">✓ Approve fix</button>`:''}
-          ${b.status!=='fixed'?`<button data-act="fixed" data-id="${b.id}">Mark fixed</button>`:''}
-          ${b.status!=='new'?`<button data-act="new" data-id="${b.id}">Reopen</button>`:''}
+          ${b.status==='needs-auth'?`<button data-act="approve" data-id="${esc(b.id)}">✓ Approve fix</button>`:''}
+          ${b.status!=='fixed'?`<button data-act="fixed" data-id="${esc(b.id)}">Mark fixed</button>`:''}
+          ${b.status!=='new'?`<button data-act="new" data-id="${esc(b.id)}">Reopen</button>`:''}
         </div>
       </div>
       <div class="shot">${shot}</div>
