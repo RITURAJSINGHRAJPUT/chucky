@@ -72,7 +72,7 @@ They look alike; they are not. Assuming otherwise has already caused bugs.
 | Description edit | Y | Y | n/a | Y | Y | Y |
 | Price edit | Y | Y | Y (3 tiers) | Y | Y | Y |
 | Volume / grams | n/a | Y (grams) | n/a | Y | Y | Y |
-| **ADD** | Y ⚠ | Y ⚠ | Y | Y | Y | Y |
+| **ADD** | Y | Y | Y | Y | Y | Y |
 | **REMOVE** | Y | Y | Y | Y | Y | Y |
 | Markers | Y | Y | n/a | n/a | Y | Y |
 | NEW badge | Y | Y | – | – | Y | Y |
@@ -86,9 +86,10 @@ They look alike; they are not. Assuming otherwise has already caused bugs.
 | Preview click-to-jump (`pv*`) | Y | Y | Y | Y | Y | Y |
 | Standalone `/preview/` | Y | Y | Y | Y | Y | Y |
 | Export | Y | Y | Y | Y | Y | Y |
-| Working harness | Y | Y | **NONE** | Y* | Y | Y |
+| Working harness | Y | Y | Y (`churndh.js`) | Y | Y | Y |
 
-⚠ ADD produces corrupted output — see §8. \* only after fixing hard-coded paths — see §7.
+ADD once stamped the wrong font on Capiche page 0 — fixed, see §8. Every harness now runs on any
+machine; the previously hard-coded macOS paths are gone, see §7.
 
 **HARD RULE 6** (every editor keeps ADD and REMOVE): satisfied.
 **HARD RULE 5** (build for all brands): violated on reorder — Capiche and Churn'd lack it.
@@ -125,9 +126,10 @@ Two live paths exist and the repo does not say which is authoritative:
   native expiry). `netlify.toml` states the Worker is *deliberately* left on the old URL.
 
 There is **no `.netlify` link and no Netlify URL recorded anywhere in the repo**, so which URL staff
-actually open is unknown from the repository alone. CLAUDE.md §2/§4 still document only the wrangler
-route, and §7's claim that `BUG_KEY` lives in `wrangler.jsonc` in the clear is **out of date** — it
-was removed and the file now says to treat the old value as burned.
+actually open is unknown from the repository alone. **CLAUDE.md §2/§4 still document only the
+wrangler deploy route and its repo map omits `netlify/`** — a real gap for anyone picking this up.
+(CLAUDE.md §7's `BUG_KEY` text was corrected: the key is no longer in `wrangler.jsonc`, the old value
+should be treated as burned, and the query-string/CORS weaknesses are now stated there.)
 
 `/preview/` needs no routing config on either host (Worker falls through to `ASSETS`, Netlify
 publishes the directory).
@@ -168,17 +170,33 @@ produces print-ready menus. Vendoring or SRI is the fix; it would also remove th
 env vars), `markerh.js` (drinks markers/add/remove), `framh.js` (drinks photo framing),
 `src/drinks/harness_bands.js` (Aiko drinks — **14 assertions, all passing**).
 
-**Gaps:**
+**`npm test`** runs `test/regress.js` — **31 cases, 1 declared known-fail, 0 failures** (verified in
+both fast and `FULL=1` mode). It *renders*: `test/lib/render.mjs` rasterises via the `mupdf`
+devDependency and `textLines()` returns exact per-line ink boxes, so `test/lib/audit.mjs` can assert
+overlap, missing text and row-box containment — things byte diffing cannot see. Known bugs are pinned
+as `KNOWN-FAIL` entries, and an unexpected pass is reported so a stale declaration cannot hide a fix.
+Security has its own runners folded into the same gate: `test/bugapi.test.mjs` (30 assertions, incl.
+Worker/Netlify agreement) and `test/bugsdash.test.mjs` (9, driving the real dashboard `render()`
+against poisoned records).
 
-- **Churn'd has zero coverage and cannot boot any existing harness** (schema mismatch, §4).
-- **Four committed test files hard-code the previous maintainer's macOS scratchpad**
-  (`/private/tmp/claude-501/-Users-apple/…`): `src/drinks/harness.js`, `src/drinks/harness_bands.js`,
-  `src/capiche/repro_risotto.js`, `src/capiche/test_markers.js`. They fail immediately elsewhere.
-- `framh.js` requires `/tmp/frame_test.jpg`, a fixture **not in the repo**.
-- **No test renders anything.** Every harness stops at bytes — which is exactly why the ADD font bug
-  (§8) survived: it is invisible at the byte level and obvious in a render.
-- No byte-identity regression test, despite that being the cleanest invariant available.
-- CLAUDE.md §5 does not mention `src/drinks/harness*.js` at all.
+**Closed since the first draft of this document:** Churn'd now has `churndh.js` (it needs its own —
+`FM.items` vs `FM.fields`, plus a `.brand` element the food stub lacks) and its 2-up dual-span
+splicing is asserted; the four macOS-hard-coded paths now use `test/lib/out.js`; `framh.js` generates
+its own 4-quadrant fixture; rendering and byte-identity are both covered.
+
+**Remaining gaps:**
+
+- **Three committed harnesses are stale and still fail** — portable now, but broken for unrelated
+  reasons: `src/capiche/repro_risotto.js` and `src/capiche/test_markers.js` boot into a DOM stub with
+  no `#persona` element (the current Capiche engine requires it — they fail identically on `main`),
+  and `src/drinks/harness.js` targets the pre-band-model drinks engine that `harness_bands.js`
+  superseded. Retire or repair them.
+- `src/drinks/harness.js.bak` is committed and still contains the old hard-coded macOS path. It is
+  never executed, but it should not be in the tree.
+- **Churn'd ADD/REMOVE are plumbed but not asserted** — `churndh.js` accepts `REMOVED`/`ADDED`, and
+  no test exercises them.
+- Markers are asserted on Ahmedabad only; photo framing is smoke-tested, not asserted.
+- Aiko's empty-edit export is not byte-identical (§8) — pre-existing, identical on `main`.
 
 **Render tooling:** CLAUDE.md specifies Python + PyMuPDF. Python is not installed on the current
 maintainer's machine. MuPDF's WASM build (`mupdf` on npm) works cross-platform with no native build

@@ -74,3 +74,18 @@ export const clampState = (s) => {
   try { const j = JSON.stringify(s); return j.length > MAX_STATE ? { truncated: true, bytes: j.length } : s; }
   catch { return null; }
 };
+
+/* The update route used to `Object.assign` the request body straight onto the stored record, so a
+   key-holder could rewrite ANY field — re-inject a `shot`/`url` that the POST clamps reject,
+   re-inflate `state` past its cap, overwrite `id` so the record no longer matches its own key, or
+   set a non-numeric `t` that defeats the TTL sweep in listLive(). Only triage fields are writable. */
+export const STATUSES = new Set(['new', 'triaged', 'fixed', 'needs-auth']);
+export const sanitizePatch = (b) => {
+  const out = {};
+  if (b && typeof b === 'object') {
+    if (typeof b.status === 'string' && STATUSES.has(b.status)) out.status = b.status;
+    if (typeof b.approved === 'boolean') out.approved = b.approved;
+    if (typeof b.resolution === 'string') out.resolution = b.resolution.slice(0, 2000);
+  }
+  return out;
+};

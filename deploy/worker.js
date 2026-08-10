@@ -25,6 +25,21 @@ const clampState = (s) => {
   catch { return null; }
 };
 
+/* The update route used to `Object.assign` the request body straight onto the stored record, so a
+   key-holder could rewrite ANY field — re-inject a `shot`/`url` that the POST clamps above reject,
+   re-inflate `state` past its cap, overwrite `id` so the record no longer matches its own key, or
+   set a non-numeric `t` that defeats the 45-day TTL sweep. Only the triage fields are writable. */
+const STATUSES = new Set(['new', 'triaged', 'fixed', 'needs-auth']);
+const sanitizePatch = (b) => {
+  const out = {};
+  if (b && typeof b === 'object') {
+    if (typeof b.status === 'string' && STATUSES.has(b.status)) out.status = b.status;
+    if (typeof b.approved === 'boolean') out.approved = b.approved;
+    if (typeof b.resolution === 'string') out.resolution = b.resolution.slice(0, 2000);
+  }
+  return out;
+};
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
@@ -68,7 +83,9 @@ export default {
     if (url.pathname.startsWith('/api/bug/') && (request.method==='POST'||request.method==='PATCH')) {
       if (url.searchParams.get('k') !== env.BUG_KEY) return new Response('forbidden', { status:403 });
       const id = url.pathname.split('/').pop(); const v = await env.BUGS.get(id); if(!v) return J({ok:false},404);
-      const rec = JSON.parse(v); Object.assign(rec, await request.json());
+      const raw = await request.text();
+      if (raw.length > MAX_STATE) return J({ ok:false, error:'payload too large' }, 413);
+      const rec = JSON.parse(v); Object.assign(rec, sanitizePatch(JSON.parse(raw)));
       await env.BUGS.put(id, JSON.stringify(rec), { expirationTtl: 60*60*24*45 });
       return J({ ok:true });
     }

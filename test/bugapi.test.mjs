@@ -16,7 +16,7 @@ const N = await import(pathToFileURL(path.join(ROOT, 'netlify/lib/bugstore.mjs')
 const workerSrc = fs.readFileSync(path.join(ROOT, 'deploy/worker.js'), 'utf8');
 const prelude = workerSrc.slice(0, workerSrc.indexOf('export default'));
 const W = await import('data:text/javascript,' + encodeURIComponent(
-  prelude + '\nexport { MAX_BODY, MAX_SHOT, MAX_STATE, safeShot, safeUrl, clampState };'));
+  prelude + '\nexport { MAX_BODY, MAX_SHOT, MAX_STATE, safeShot, safeUrl, clampState, sanitizePatch, STATUSES };'));
 
 let pass = 0, fail = 0;
 const ok = (c, m) => { if (c) { pass++; console.log('  ✓ ' + m); } else { fail++; console.log('  ✗ ' + m); } };
@@ -57,6 +57,20 @@ agree('clampState', 'a string', null, 'REJECTS non-object state');
 const huge = { blob: 'x'.repeat(W.MAX_STATE + 10) };
 ok(W.clampState(huge).truncated === true && N.clampState(huge).truncated === true,
    'REPLACES oversize state with a truncation marker (was unbounded)');
+
+// --- update route: only triage fields are writable ---------------------------------------------
+// The update route is key-gated but used to Object.assign the body straight onto the record, so a
+// key-holder could bypass every POST clamp above. These assert the allowlist, on both deployments.
+agree('sanitizePatch', { status: 'fixed' }, { status: 'fixed' }, 'accepts a valid status');
+agree('sanitizePatch', { status: 'needs-auth', approved: true }, { status: 'needs-auth', approved: true }, 'accepts status + approved');
+agree('sanitizePatch', { status: 'not-a-status' }, {}, 'REJECTS an unknown status');
+agree('sanitizePatch', { shot: 'x" onerror="alert(1)' }, {}, 'REJECTS re-injecting a shot');
+agree('sanitizePatch', { url: 'javascript:alert(1)' }, {}, 'REJECTS re-injecting a url');
+agree('sanitizePatch', { id: 'bug_other' }, {}, 'REJECTS overwriting the record id');
+agree('sanitizePatch', { t: 'not-a-number' }, {}, 'REJECTS breaking the TTL timestamp');
+agree('sanitizePatch', { state: { huge: 1 } }, {}, 'REJECTS re-inflating state');
+agree('sanitizePatch', { approved: 'yes' }, {}, 'REJECTS a non-boolean approved');
+ok(W.sanitizePatch({ resolution: 'x'.repeat(5000) }).resolution.length === 2000, 'bounds resolution length');
 
 // --- the two deployments agree on limits -------------------------------------------------------
 ok(W.MAX_BODY === N.MAX_BODY && W.MAX_SHOT === N.MAX_SHOT && W.MAX_STATE === N.MAX_STATE,
