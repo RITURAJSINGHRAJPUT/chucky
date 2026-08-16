@@ -4,6 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Churn'd · Menu Editor</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@300;400;500&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 <style>
@@ -47,7 +49,7 @@ header.bar{display:flex;align-items:center;gap:16px;padding:10px 18px;border-bot
 .search input::placeholder{color:var(--muted)}
 .search kbd{font-family:var(--mono);font-size:10px;color:var(--muted);border:1px solid var(--line2);border-radius:4px;padding:1px 5px;background:#0d0b07}
 .spacer{flex:1}
-.pill{font-size:12px;font-weight:600;letter-spacing:.02em;padding:6px 12px;border-radius:999px;border:1px solid;display:inline-flex;align-items:center;gap:7px;font-family:var(--mono)}
+.pill{font-size:12px;font-weight:500;letter-spacing:.02em;padding:6px 12px;border-radius:999px;border:1px solid;display:inline-flex;align-items:center;gap:7px;font-family:var(--mono)}
 .pill::before{content:"";width:7px;height:7px;border-radius:50%;background:currentColor}
 .pill.ok{color:var(--ok);border-color:rgba(95,176,124,.4);background:rgba(95,176,124,.08)}
 .pill.bad{color:var(--bad);border-color:rgba(229,103,94,.45);background:rgba(229,103,94,.1)}
@@ -90,11 +92,11 @@ main.app{display:grid;grid-template-columns:210px 1fr minmax(400px,560px);height
 .card:focus-within{border-color:var(--aiko-line);box-shadow:0 0 0 1px var(--aiko-line)}
 .card.haswarn{border-color:rgba(224,145,43,.5)}
 .nrow{display:flex;align-items:flex-start;gap:12px}
-.name{flex:1;min-width:0;font-family:var(--mono);font-weight:700;font-size:16px;letter-spacing:.4px;color:var(--cream);text-transform:uppercase;outline:none;border-radius:5px;padding:3px 5px;margin:-3px -5px}
+.name{flex:1;min-width:0;font-family:var(--mono);font-weight:500;font-size:16px;letter-spacing:.4px;color:var(--cream);text-transform:uppercase;outline:none;border-radius:5px;padding:3px 5px;margin:-3px -5px}
 .name:focus{background:rgba(233,184,51,.09);box-shadow:inset 0 0 0 1px var(--aiko-line)}
 .prices{display:flex;gap:6px;flex:none}
 .pwrap{display:flex;align-items:center}
-.price{width:66px;background:#100E09;border:1px solid var(--line2);border-radius:7px;color:var(--cream);font-family:var(--mono);font-size:15px;font-weight:600;text-align:right;padding:6px 9px;outline:none;font-variant-numeric:tabular-nums}
+.price{width:66px;background:#100E09;border:1px solid var(--line2);border-radius:7px;color:var(--cream);font-family:var(--mono);font-size:15px;font-weight:500;text-align:right;padding:6px 9px;outline:none;font-variant-numeric:tabular-nums}
 .price:focus{border-color:var(--aiko-line)}
 .price.err{border-color:var(--bad);background:#fff6f6;color:#1a1400}
 .rm{flex:none;width:30px;height:30px;border-radius:7px;color:var(--muted);display:grid;place-items:center;font-size:15px;transition:.13s}
@@ -165,7 +167,7 @@ main.app{display:grid;grid-template-columns:210px 1fr minmax(400px,560px);height
 @keyframes pop{0%{transform:scale(.6) rotate(-8deg);opacity:0}60%{transform:scale(1.06)}100%{transform:scale(1) rotate(0);opacity:1}}
 #celebrate .cbcat{width:120px;height:120px;color:var(--aiko)}
 #celebrate .cbcat svg{width:100%;height:100%}
-#celebrate .cbline{font-family:var(--mono);font-weight:700;font-size:26px;color:var(--cream);letter-spacing:.5px}
+#celebrate .cbline{font-family:var(--mono);font-weight:500;font-size:26px;color:var(--cream);letter-spacing:.5px}
 #celebrate .cbsub{font-size:12px;color:var(--muted)}
 
 .scrim{position:fixed;inset:0;background:rgba(8,6,3,.55);z-index:44;display:none}
@@ -198,8 +200,8 @@ main.app{display:grid;grid-template-columns:210px 1fr minmax(400px,560px);height
 
 /* Churn'd specifics */
 .wordmark{font-family:var(--serif);font-style:italic;font-weight:600;font-size:23px;color:var(--red);line-height:1}
-.grouphd.sechd .cols{font-family:var(--mono);font-style:normal;font-size:9.5px;letter-spacing:1px;color:var(--muted);font-weight:700;text-transform:none}
-input.name{background:#100E09;border:1px solid var(--line2);font-family:var(--mono);font-weight:700;font-size:16px;letter-spacing:.4px;text-transform:uppercase;color:var(--cream);padding:8px 10px;border-radius:7px;margin:0;width:auto;flex:1;min-width:150px}
+.grouphd.sechd .cols{font-family:var(--mono);font-style:normal;font-size:9.5px;letter-spacing:1px;color:var(--muted);font-weight:500;text-transform:none}
+input.name{background:#100E09;border:1px solid var(--line2);font-family:var(--mono);font-weight:500;font-size:16px;letter-spacing:.4px;text-transform:uppercase;color:var(--cream);padding:8px 10px;border-radius:7px;margin:0;width:100%;box-sizing:border-box;min-width:150px}
 input.name:focus{border-color:var(--aiko-line);background:#12100a;box-shadow:none}
 input.name.err{border-color:var(--bad);background:#fff6f6;color:#1a1400}
 .prices{display:flex;gap:8px;flex:none;flex-wrap:wrap}
@@ -208,7 +210,7 @@ input.name.err{border-color:var(--bad);background:#fff6f6;color:#1a1400}
 .pcol .price{width:70px}
 #editor .card{position:relative}
 #editor .card>.rm{position:absolute;top:13px;right:13px;margin:0}
-#editor .card>input.name{margin-right:40px}
+#editor .card>input.name{width:calc(100% - 40px);margin-right:40px}
 #editor .card{padding-bottom:12px}
 .addcard{background:var(--card2);border:1px solid var(--aiko-line)}
 .addbtn{width:100%;padding:11px;border:1.5px dashed var(--line2);border-radius:11px;color:var(--muted);font-size:13px;letter-spacing:.03em;transition:.13s;margin:2px 0 6px}
@@ -315,9 +317,14 @@ function menuOps(){
   const ops=[], rh=FM.row_h;
   const removedYs=[...removed].map(id=>FM.items[id].row_y);
   const insertYs=added.map(a=>FM.sections[a.sec].add.last_y);
+  // tolerance must clear a row's own name/price y-gap (~0.1-0.9pt apart) without reaching the
+  // next row (rh apart) -> half a row-height. A tight ±0.05 let a name and its own price fall on
+  // opposite sides of an insertion anchor that landed between them, shifting one but not the
+  // other and splitting the row (e.g. PASSION FRUIT RASPBERRY's price stranded on BOUNTY's row).
+  const TOL=rh/2;
   const shiftFor=y=>{ let s=0;
-    for(const ry of removedYs) if(ry > y+0.05) s+=rh;      // removed above -> rows below rise
-    for(const iy of insertYs) if(iy > y+0.05) s-=rh;      // added above -> rows below drop
+    for(const ry of removedYs) if(ry > y+TOL) s+=rh;      // removed above -> rows below rise
+    for(const iy of insertYs) if(iy > y+TOL) s-=rh;      // added above -> rows below drop
     return s; };
   for(const t of FM.tm_shifts){ const s=shiftFor(t.y); if(s) ops.push({s:t.span[0],e:t.span[1],rep:enc(fmtNum(t.y+s))}); }
   for(const id of removed){ const it=FM.items[id];
