@@ -64,6 +64,8 @@ header.bar{display:flex;align-items:center;gap:16px;padding:10px 18px;border-bot
 #export{background:var(--aiko);color:#1a1400;font-weight:700;letter-spacing:.03em;padding:9px 16px;border-radius:9px;font-size:13px;transition:.15s}
 #export:hover{filter:brightness(1.07);transform:translateY(-1px)}
 #export:disabled{opacity:.4;cursor:not-allowed;transform:none;filter:none}
+input.name.toolong{border-color:#e5675e;color:#e5675e}
+.toolongmsg{flex-basis:100%;font-size:11.5px;line-height:1.45;color:#e5675e;margin:4px 0 0}
 .prevtoggle{display:none;align-items:center;gap:7px;font-size:12.5px;color:var(--cream-dim);border:1px solid var(--line2);border-radius:9px;padding:8px 13px}
 .prevtoggle:hover{border-color:var(--aiko-line);color:var(--cream)}
 
@@ -452,10 +454,25 @@ function nameIssues(v){ const bad=[],warn=[];
     if(wordAllowed(w)) continue; const sg=suggest(deacc(w).replace(/[^A-Za-z']/g,''));
     if(sg.length) bad.push(w.toUpperCase()+' \u2192 '+sg[0].toUpperCase()+'?'); else warn.push(w.toUpperCase()); }
   return {bad,warn}; }
+/* How many characters a flavour name can hold before it runs into its own price columns. Churn'd
+   had NO width check at all \u2014 a long name simply kept drawing, straight through the price columns
+   and on into the second copy of the 2-up sheet, printing garbage over both. Measured from the real
+   geometry (name_x -> first price x) rather than a guessed constant; the /T1_0 face advances at
+   0.664 em, checked against three baked names. */
+const NAME_ADV=0.664, NAME_SIZE=12.5, NAME_PAD=6;
+function nameMaxChars(it){
+  const nx=(it.name_x&&it.name_x[0]), px=(it.prices&&it.prices[0]&&it.prices[0].x&&it.prices[0].x[0]);
+  if(nx==null||px==null||px<=nx) return 31;                    // measured default for this sheet
+  return Math.max(4, Math.floor((px-nx-NAME_PAD)/(NAME_ADV*NAME_SIZE)));
+}
+function nameTooLong(it, val){ return String(val||'').length > nameMaxChars(it); }
 function updateGate(){ const pill=document.getElementById('flagpill'), ex=document.getElementById('export');
   let bad=0, soft=0;
   document.querySelectorAll('#editor .warnline').forEach(w=>{ if(w.dataset.level==='bad') bad++; else soft++; });
-  if(bad){ pill.className='pill bad'; pill.textContent=bad+' spelling to fix'; ex.disabled=true; }
+  const over=document.querySelectorAll('#editor input.name.toolong').length;
+  if(bad||over){ pill.className='pill bad'; ex.disabled=true;
+    const b=[]; if(over) b.push(over+' too long'); if(bad) b.push(bad+' spelling');
+    pill.textContent=b.join(' \u00b7 ')+' to fix'; }
   else{ pill.className='pill ok'; pill.textContent='All clear'+(soft?' \u00b7 '+soft+' to review':''); ex.disabled=false; } }
 function validateNames(){
   document.querySelectorAll('#editor .card').forEach(card=>{
@@ -523,9 +540,18 @@ function buildEditor(){
       const card=document.createElement('div'); card.className='card';
       const name=document.createElement('input'); name.className='name'; name.spellcheck=false;
       name.value=('n'+it.id in edits)?edits['n'+it.id]:it.name; name.dataset.orig=it.name;
+      const markLong=()=>{
+        const cap=nameMaxChars(it), over=nameTooLong(it, name.value);
+        name.classList.toggle('toolong', over);
+        let h=card.querySelector('.toolongmsg');
+        if(over && !h){ h=document.createElement('div'); h.className='toolongmsg'; card.insertBefore(h, name.nextSibling); }
+        if(h) h.textContent = over ? ('Too long for the row — '+name.value.length+'/'+cap+' characters. Shorten it, or it will print over the prices.') : '';
+        if(h && !over) h.remove();
+      };
       name.oninput=()=>{ const v=cleanName(name.value); if(name.value!==v){const p=name.selectionStart;name.value=v;name.setSelectionRange(p-1,p-1);}
-        if(v===it.name) delete edits['n'+it.id]; else edits['n'+it.id]=v; validateNames(); schedulePreview(); };
+        if(v===it.name) delete edits['n'+it.id]; else edits['n'+it.id]=v; markLong(); validateNames(); schedulePreview(); };
       card.appendChild(name);
+      markLong();                                  // after the input is in the card, so the hint can sit beside it
       card.appendChild(priceCols(sec, ci=>('p'+it.id+'_'+ci in edits)?edits['p'+it.id+'_'+ci]:(it.prices[ci]?it.prices[ci].text:''),
         (ci,v)=>{ const orig=it.prices[ci]?it.prices[ci].text:''; if(v===orig) delete edits['p'+it.id+'_'+ci]; else edits['p'+it.id+'_'+ci]=v; }));
       const rm=document.createElement('button'); rm.className='rm'; rm.title='Remove this item'; rm.textContent='✕';

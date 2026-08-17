@@ -44,7 +44,8 @@ function run(script, args, env) {
   return execFileSync(process.execPath, [path.join(ROOT, script), ...args],
     { cwd: ROOT, env: { ...process.env, ...env }, stdio: ['ignore', 'pipe', 'pipe'], timeout: 300000 }).toString();
 }
-const food   = (d, out, edits, env) => { run('foodh.js', [ED(d), out, JSON.stringify(edits || {})], env); return out; };
+// `markers` is foodh.js's optional 4th argv (dish id -> desired marker set), not an env var
+const food   = (d, out, edits, env, markers) => { run('foodh.js', [ED(d), out, JSON.stringify(edits || {}), ...(markers ? [JSON.stringify(markers)] : [])], env); return out; };
 const foodAR = (d, out, edits, env) => { run('foodh_ar.js', [ED(d), out, JSON.stringify(edits || {})], env); return out; };
 const drinks = (d, prefix, scen)    => { run('markerh.js', [ED(d), prefix, JSON.stringify(scen)]); return `${prefix}_${scen[0].name}.pdf`; };
 
@@ -260,6 +261,196 @@ const EDITORS = [
     }
     return [!bad.length, bad.length ? bad.slice(0, 2).join('; ') : `${heads.length} pairs`];
   });
+
+  /* ---- Dependent geometry follows the text it is anchored to -----------------------------------
+     Three reported bugs shared one cause: the engine spliced new text in, but everything positioned
+     RELATIVE to that text kept its pristine coordinates. These pin the two things that must move. */
+
+  // A decorative label is placed by its serif word's right edge, so renaming the word must carry it.
+  // Assert the OFFSET is preserved rather than "no overlap": the artwork deliberately sits the
+  // script label over the serif word's tail (12pt of it, baked), and that look must survive.
+  await guard('aiko: renaming a category carries its decorative label', async () => {
+    const fm = JSON.parse(fs.readFileSync(path.join(ED('aiko'), 'fieldmap.json'), 'utf8'));
+    const sf = fm.fields.find(f => f.role === 'header' && f.kind === 'serif' && f.display === 'Sides');
+    const lf = fm.fields.find(q => q.id === sf.pair);
+    const base = R.textLines(path.join(ED('aiko'), 'aiko.pdf'), sf.page);
+    const b0 = base.find(l => l.text.trim() === sf.display), l0 = base.find(l => l.text.trim() === lf.display);
+    const out = food('aiko', outFile('aiko_label_follow.pdf', 'regress'), { [sf.id]: 'Sides moin' });
+    const cur = R.textLines(out, sf.page);
+    const b1 = cur.find(l => l.text.trim() === 'Sides moin'), l1 = cur.find(l => l.text.trim() === lf.display);
+    if (!b0 || !l0 || !b1 || !l1) return [false, 'heading or label line not found'];
+    if (Math.abs(l1.x0 - l0.x0) < 1) return [false, `label did not move (x0 ${l0.x0} -> ${l1.x0})`];
+    // same tuck under the word's tail, within a glyph's right-side bearing
+    const tuck0 = b0.x1 - l0.x0, tuck1 = b1.x1 - l1.x0;
+    return [Math.abs(tuck1 - tuck0) < 4,
+      `label x0 ${l0.x0.toFixed(1)}->${l1.x0.toFixed(1)}, tuck ${tuck0.toFixed(1)}->${tuck1.toFixed(1)}pt`];
+  });
+
+  // Allergen icons are anchored to the name's right edge. A longer name used to print through them.
+  for (const [ed, id, longer, icon] of [
+    ['aiko', '0:0', 'TOM YUM SOUP MOIN SARFARAZ', null],
+    ['capiche', '0:0', 'MARGHERITAXX', 'J'],
+  ]) {
+    await guard(`${ed}: a longer dish name carries its allergen markers`, async () => {
+      const fm = JSON.parse(fs.readFileSync(path.join(ED(ed), 'fieldmap.json'), 'utf8'));
+      const f = fm.fields.find(q => q.id === id);
+      const src = path.join(ED(ed), fs.readdirSync(ED(ed)).find(n => n.endsWith('.pdf')));
+      const before = A.overlaps(src, f.page, { menuMaxX: 520 });
+      const out = food(ed, outFile(`${ed}_name_markers.pdf`, 'regress'), { [id]: longer });
+      const after = A.overlaps(out, f.page, { menuMaxX: 520 });
+      // reflow moves ink, and newFindings keys on the boxes, so compare by TEXT PAIR
+      const tkey = o => o.a + ' ' + o.b, seen = new Set(before.map(tkey));
+      const fresh = after.filter(o => !seen.has(tkey(o)));
+      if (!A.hasText(out, f.page, longer)) return [false, 'the longer name did not render'];
+      if (fresh.length) return [false, `new overlap: ${JSON.stringify(fresh[0].a)} <> ${JSON.stringify(fresh[0].b)}`];
+      if (icon) {   // a text-drawn marker we can measure directly (Capiche's Jain "J")
+        const g = (s) => (R.textLines(s, f.page).filter(l => l.text.trim() === icon && Math.abs(l.bot - f.y) < 6)[0] || {}).x0;
+        const x0 = g(src), x1 = g(out);
+        if (x0 == null || x1 == null) return [false, `marker "${icon}" not found`];
+        if (x1 - x0 < 1) return [false, `marker "${icon}" did not move (${x0} -> ${x1})`];
+        return [true, `no new overlaps; "${icon}" moved ${(x1 - x0).toFixed(1)}pt with the name`];
+      }
+      return [true, 'no new overlaps; icons cleared the longer name'];
+    });
+  }
+
+  /* Korea is the ONLY marker with no icon template in FM.icons — it is drawn from vector
+     primitives by flagBody(). The deployed build has no such branch, so `!ICONS[m]` skipped it and
+     re-stamping any Korean dish DELETED its flag (verified by running the live build through this
+     same harness). Pin both halves: drawn, and drawn exactly once. The generated flag's fills do
+     not occur anywhere in the baked artwork, which is what makes the count meaningful. */
+  await guard('aiko: a korea marker is stamped from the real artwork, exactly once', async () => {
+    const fm = JSON.parse(fs.readFileSync(path.join(ED('aiko'), 'fieldmap.json'), 'utf8'));
+    // a dish on page 0 that does NOT already carry the flag, so the count must rise by exactly one
+    const dish = fm.fields.find(f => f.role === 'name' && f.page === 0 && (f.baked || []).length
+                                  && !(f.baked || []).includes('korea'));
+    const RED = /0\.773 0\.125 0\.196 rg/g;      // the artwork's own red, not a redrawn approximation
+    const count = s => (s.match(RED) || []).length;
+    const base = count((await pageStreams(path.join(ED('aiko'), 'aiko.pdf')))[0].toString('latin1'));
+    if (!base) return [false, 'no baked korea flag on page 0 to copy from'];
+    const want = [...(dish.baked || []), 'korea'];
+    const out = food('aiko', outFile('aiko_korea.pdf', 'regress'), {}, null, { [dish.id]: want });
+    const got = count((await pageStreams(out))[0].toString('latin1'));
+    if (got === base) return [false, `${dish.display}: korea flag not drawn at all (live build's bug)`];
+    return [got === base + 1, `${dish.display}: flags ${base} -> ${got} (must be +1 exactly)`];
+  });
+
+  // Icon templates carry no fill colour, so an appended cluster inherits whatever the page last
+  // set — that is how an added gluten icon came out gold on THAI CURRY. The cluster must pin the ink.
+  await guard('aiko: a re-stamped marker cluster pins its own ink colour', async () => {
+    const fm = JSON.parse(fs.readFileSync(path.join(ED('aiko'), 'fieldmap.json'), 'utf8'));
+    const dish = fm.fields.find(f => f.role === 'name' && /THAI CURRY/.test(f.display || ''));
+    const want = [...new Set([...(dish.baked || []), 'gluten'])];
+    const out = food('aiko', outFile('aiko_ink.pdf', 'regress'), {}, null, { [dish.id]: want });
+    const s = (await pageStreams(out))[dish.page].toString('latin1');
+    const grp = s.lastIndexOf('re\nW n\n');
+    if (grp < 0) return [false, 'no appended marker group found'];
+    const head = s.slice(grp, grp + 40);
+    return [/re\nW n\n0 g\n/.test(head), `cluster prologue: ${JSON.stringify(head.slice(0, 24))} (must set "0 g")`];
+  });
+
+  /* Churn'd had no width check of any kind, so a long flavour name kept drawing straight through
+     its own price columns and on into the second copy of the 2-up sheet. The cap is derived from
+     the real geometry; this pins that it exists, that it is derived (not a guessed constant), and
+     that it can never fire on untouched artwork. */
+  await guard("churnd: a flavour name is capped to the width before its price columns", async () => {
+    const src = fs.readFileSync(path.join(ED('churnd'), 'index.html'), 'utf8');
+    if (!/function nameMaxChars/.test(src)) return [false, 'nameMaxChars() is gone — names are ungated again'];
+    if (!/toolong/.test(src)) return [false, 'no overflow class wired into the export gate'];
+    const fm = JSON.parse(fs.readFileSync(path.join(ED('churnd'), 'fieldmap.json'), 'utf8'));
+    const ADV = 0.664, SZ = 12.5, PAD = 6;
+    const cap = it => {
+      const nx = it.name_x && it.name_x[0], px = it.prices && it.prices[0] && it.prices[0].x && it.prices[0].x[0];
+      return (nx == null || px == null || px <= nx) ? 31 : Math.max(4, Math.floor((px - nx - PAD) / (ADV * SZ)));
+    };
+    const flagged = fm.items.filter(it => (it.name || '').length > cap(it));
+    if (flagged.length) return [false, `cap rejects baked artwork: ${flagged.slice(0, 2).map(i => i.name).join('; ')}`];
+    const longest = fm.items.reduce((a, b) => (b.name || '').length > (a.name || '').length ? b : a);
+    const caps = [...new Set(fm.items.map(cap))].sort((a, b) => a - b);
+    return [caps[0] > longest.name.length,
+      `caps ${caps.join('/')} chars vs longest baked name ${longest.name.length} — headroom ${caps[0] - longest.name.length}`];
+  });
+
+  /* A description that needs another line now pushes the dishes beneath it down, instead of being
+     silently shrunk to fit the designer's gap. The size assertion is the point: without it this
+     passes on the OLD behaviour, which did render the text — just at 6.185pt instead of 7pt. */
+  await guard('aiko: a description that needs a third line pushes the dishes below down', async () => {
+    const SRC = path.join(ED('aiko'), 'aiko.pdf');
+    const LONG = 'Broth, mushroom, tomatoes, bellpeppers, chilli, lemongrass, galangal, kaffir lime, fresh coriander';
+    const out = food('aiko', outFile('aiko_grow.pdf', 'regress'), { '0:1': LONG });
+    const bl = R.textLines(SRC, 0), cl = R.textLines(out, 0);
+    const nameOf = L => L.find(l => l.text.startsWith('THAI SPRING ROLL'));
+    const b = nameOf(bl), c = nameOf(cl);
+    if (!b || !c) return [false, 'THAI SPRING ROLL not found'];
+    if (!A.hasText(out, 0, 'fresh coriander')) return [false, 'the tail of the description did not print'];
+    const descs = cl.filter(l => l.bot < 692 && l.bot > 660 && l.x0 < 60);
+    if (descs.length < 3) return [false, `description rendered ${descs.length} line(s), expected 3`];
+    // full size preserved: the grown lines are the same height as the baked one-liner
+    const bh = (bl.find(l => l.text.startsWith('Broth,')) || {}).top - (bl.find(l => l.text.startsWith('Broth,')) || {}).bot;
+    const ch = descs[0].top - descs[0].bot;
+    if (Math.abs(ch - bh) > 0.6) return [false, `type shrank instead of pushing: line height ${bh} -> ${ch}`];
+    const moved = b.bot - c.bot;
+    if (moved <= 0.5) return [false, `dish below did not move down (${moved.toFixed(2)}pt)`];
+    /* Calibrate against the artwork rather than a page-wide overlap sweep: mupdf's line boxes are
+       9pt tall on an 8.4pt baseline pitch, so consecutive lines of ANY multi-line description report
+       as overlapping — the baked page already does it in four places. What must hold is that the
+       grown dish keeps at least the clearance the designer's own tightest pair already uses. */
+    const tightestBaked = Math.min(...bl.filter(l => l.x0 < 60 && l.bot > 100)
+      .map(l => { const below = bl.filter(n => n.x0 < 60 && n.bot < l.bot - 1).sort((a, b) => b.bot - a.bot)[0];
+                  return below ? l.bot - below.bot : Infinity; }).filter(v => isFinite(v) && v > 0));
+    const last = descs.sort((a, b) => a.bot - b.bot)[0];       // lowest rendered description line
+    const gap = last.bot - c.bot;                              // down to the next dish's baseline
+    if (gap < tightestBaked - 0.05)
+      return [false, `only ${gap.toFixed(2)}pt to the dish below; the artwork's own tightest is ${tightestBaked.toFixed(2)}pt`];
+    return [true, `3 lines at full size (h=${ch}), dish below moved down ${moved.toFixed(2)}pt, clearance ${gap.toFixed(2)}pt`];
+  });
+
+  /* Capiche growth, and growth composing with ADD / REMOVE. Capiche's structuralForPage addresses
+     rows by baseline (no _rowId) and takes its sections from nav_sections, so the row->growth map
+     is resolved the same way _rowSec is. Exercised in the RIGHT column of p0, which is the one with
+     real headroom. `0:21` is APOLLO's description; `0:14`/`0:18` are ORTOLANA / GARLIC PIE. */
+  {
+    const CAP_LONG = 'POMODORO SAUCE, MOZZARELLA, FENNEL SALAMI, NDUJA, HOT HONEY, BASIL, CHILLI FLAKES, AGED PARMESAN, WILD ROCKET, TOASTED PINE NUTS';
+    const mkAdd = (n, i) => ({ sec: 1, name: n, desc: 'TOMATO, BASIL, OLIVE OIL', price: '540', price2: '', allergens: ['dairy'], _id: 900 + i });
+    const SCEN = [
+      ['capiche: a grown description pushes the dishes below down', [], []],
+      ['capiche: growth composes with an added dish', [], [mkAdd('TEST ALPHA', 1)]],
+      ['capiche: growth composes with a removed dish', ['0:14'], []],
+      ['capiche: growth composes with two removed dishes', ['0:14', '0:18'], []],
+      ['capiche: growth composes with an add and a remove', ['0:14'], [mkAdd('TEST ALPHA', 1)]],
+    ];
+    const SRC = path.join(ED('capiche'), 'capiche.pdf');
+    for (const [name, removed, added] of SCEN) {
+      await guard(name, async () => {
+        const env = {};
+        if (removed.length) env.REMOVED = JSON.stringify(removed);
+        if (added.length) env.ADDED = JSON.stringify(added);
+        const out = foodAR('capiche', outFile(`cap_grow_${removed.length}${added.length}.pdf`, 'regress'),
+          { '0:21': CAP_LONG }, env);
+        const base = R.textLines(SRC, 0), cur = R.textLines(out, 0);
+        // the description grew, and did NOT just shrink to fit the designer's gap
+        if (!cur.some(l => /TOASTED PINE NUTS/i.test(l.text))) return [false, 'description tail did not print'];
+        const b0 = base.find(l => /^POMODORO SAUCE, MOZZARELLA, FE/i.test(l.text));
+        const c0 = cur.find(l => /^POMODORO SAUCE/i.test(l.text));
+        if (!b0 || !c0) return [false, 'description not found'];
+        if (Math.abs((c0.top - c0.bot) - (b0.top - b0.bot)) > 0.6) return [false, 'type shrank instead of pushing'];
+        // consecutive lines of ANY multi-line description share ink boxes (9pt box, 8.4pt pitch),
+        // so compare by text pair against the baked page and ignore the grown block's own lines
+        const tk = o => o.a + ' ' + o.b, seen = new Set(A.overlaps(SRC, 0, { menuMaxX: 900 }).map(tk));
+        const fresh = A.overlaps(out, 0, { menuMaxX: 900 }).filter(o => !seen.has(tk(o)))
+          .filter(o => !/^(POMODORO SAUCE|FENNEL|HOT HONEY|CHILLI FLAKES|AGED PARMESAN|WILD ROCKET|TOASTED)/i.test(o.a));
+        if (fresh.length) return [false, `new overlap: ${JSON.stringify(fresh[0].a).slice(0, 40)} <> ${JSON.stringify(fresh[0].b).slice(0, 36)}`];
+        for (const id of removed) {
+          const f = JSON.parse(fs.readFileSync(path.join(ED('capiche'), 'fieldmap.json'), 'utf8')).fields.find(q => q.id === id);
+          if (f && cur.some(l => l.text.trim() === f.display)) return [false, `removed "${f.display}" still rendered`];
+        }
+        const placed = added.filter(a => cur.some(l => l.text.includes(a.name))).length;
+        const bal = await operatorBalance(out);
+        if (bal && bal.length) return [false, `operators unbalanced: ${JSON.stringify(bal[0])}`];
+        return [true, `full size preserved, ${placed}/${added.length} added placed, no new overlaps`];
+      });
+    }
+  }
 
   // The category fonts are SUBSETS holding only the glyphs the artwork already uses, so most
   // realistic renames are unrepresentable. Pin the ceiling so nobody "fixes" a rename by writing
