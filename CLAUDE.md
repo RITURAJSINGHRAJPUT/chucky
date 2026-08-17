@@ -174,7 +174,8 @@ already in the repo are enough to *edit* today):
 ```
 CLAUDE.md                # this guide
 deploy/
-  wrangler.jsonc         # Worker: name=bookends-chucky, ASSETS=./public, KV BUGS, var BUG_KEY
+  wrangler.jsonc         # Worker: name=bookends-chucky, ASSETS=./public, KV BUGS (BUG_KEY is a
+                         #   secret, NOT in this file)
   worker.js              # serves public/ + bug-report API (/api/bug, /api/bugs)
   public/
     index.html                      # Bookends landing
@@ -203,7 +204,7 @@ something behaves oddly.
 
 **Resources:** Worker `bookends-chucky` (`deploy/wrangler.jsonc` + `deploy/worker.js`); static assets
 = `deploy/public/` (binding `ASSETS`); KV namespace `BUGS` (id `53a121594626447e9579fcef063fdd64`,
-stores bug reports, ~45-day TTL); var `BUG_KEY` (gates the bug-queue read/update API). URL is the
+stores bug reports, ~45-day TTL); secret `BUG_KEY` (gates the bug-queue read/update API). URL is the
 `*.capichesecretmenu.workers.dev` subdomain.
 
 *To run on a different Cloudflare account instead:* `npx wrangler kv namespace create BUGS` → put the
@@ -212,9 +213,12 @@ new id in `wrangler.jsonc`, change the Worker `name`, set your own `BUG_KEY`, de
 **Secrets/safety:**
 - No API tokens are committed; `.gitignore` excludes `node_modules`, wrangler cache, `.env`,
   `.dev.vars`, `*.token`. Never commit a `cfat_…`/OAuth token.
-- `BUG_KEY` **is** in `wrangler.jsonc` in the clear (it only guards the low-value bug queue). Fine
-  while the repo is **private**. If it ever goes public, move it to a real secret
-  (`wrangler secret put BUG_KEY`) and remove it from the config.
+- `BUG_KEY` is **no longer in `wrangler.jsonc`** — it was removed, and the old value should be
+  treated as burned because it lived in the repo in clear text. Set a fresh one before the next
+  deploy: `cd deploy && npx wrangler secret put BUG_KEY` (on Netlify it is an environment variable,
+  read via `process.env.BUG_KEY`). It is not recoverable from this repo's history.
+  Known weaknesses, unchanged: the key travels in the **query string** (`?k=…`), so it lands in
+  access logs, browser history and referrers; and both hosts send `access-control-allow-origin: *`.
 - The menu PDFs are the restaurant's artwork — keep the repo private.
 
 **Open item:** the in-editor bug capture + `/bugs/` dashboard are live; an **autonomous daily

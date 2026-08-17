@@ -7,7 +7,7 @@
 // Static assets are served by Netlify from deploy/public (see netlify.toml), which is what the
 // Worker's final `env.ASSETS.fetch(request)` fallback did.
 import { store, listLive, readRec, newId, cors, J, authed,
-         MAX_BODY, safeShot, safeUrl, clampState } from '../lib/bugstore.mjs';
+         MAX_BODY, MAX_STATE, safeShot, safeUrl, clampState, sanitizePatch } from '../lib/bugstore.mjs';
 
 // When this function returns a non-2xx, Netlify retries the static-resolution chain — the same
 // request arrives again as /api/bugs.html, /api/bugs.htm, /api/bugs/index.html, /api/bugs/index.htm
@@ -66,7 +66,9 @@ export default async (req, context) => {
     const id = context.params?.id || path.split('/').pop();
     const rec = await readRec(s, id);
     if (!rec) return J({ ok: false }, 404);
-    Object.assign(rec, await req.json());
+    const raw = await req.text();
+    if (raw.length > MAX_STATE) return J({ ok: false, error: 'payload too large' }, 413);
+    Object.assign(rec, sanitizePatch(JSON.parse(raw)));
     await s.setJSON(id, rec);
     return J({ ok: true });
   }

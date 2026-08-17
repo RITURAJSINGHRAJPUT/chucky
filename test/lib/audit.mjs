@@ -50,3 +50,22 @@ export function newFindings(baseline, current) {
 export function hasText(src, page, needle) {
   return textLines(src, page).some(l => l.text.includes(needle));
 }
+
+/**
+ * Vertical clearance, in points, between the ink of two rendered lines: how far the LOWEST line
+ * matching `aNeedle` sits above the topmost line matching `bNeedle`. Positive means `a` clears `b`;
+ * <= 0 means they touch or overlap. `overlaps()` only reports pairs that also share x, so this is
+ * the sharper assertion when you know exactly which two things must not collide.
+ * Returns null if either needle is absent — callers should treat that as a failure, not a pass.
+ */
+export function clearance(src, page, aNeedle, bNeedle) {
+  const L = textLines(src, page);
+  const a = L.filter(l => l.text.includes(aNeedle)).pop();
+  const b = L.find(l => l.text.includes(bNeedle));
+  return (a && b) ? +(a.bot - b.top).toFixed(3) : null;
+}
+
+/** Every rendered line whose text matches, as ink boxes — for counting duplicates of stamped art. */
+export function linesMatching(src, page, re) {
+  return textLines(src, page).filter(l => re.test(l.text));
+}

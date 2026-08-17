@@ -476,7 +476,7 @@ function cleanField(v, role){ const al=(FM.allowed&&FM.allowed[role])||''; let o
 
 function fontNote(chars){ let n=document.getElementById('fontnote'); if(!n)return; n.textContent='“'+chars+'” isn’t in this menu’s font'; n.classList.add('on'); clearTimeout(n._t); n._t=setTimeout(()=>n.classList.remove('on'),2400); }
 function cleanField(v, role){ const al=(FM.allowed&&FM.allowed[role]); if(al==null) return v; let out='',drop=''; for(const ch of v){ if(al.indexOf(ch)>=0||ch===' ') out+=ch; else drop+=ch; } if(drop.replace(/\s/g,'')) fontNote(drop.replace(/\s+/g,' ').trim().split('').join(' ')); return out; }
-function greedyWrap(words,mc){ const L=[];let c='';for(const w of words){if(!c)c=w;else if((c+' '+w).length<=mc)c+=' '+w;else{L.push(c);c=w;}}if(c)L.push(c);return L; }
+function greedyWrap(words,mc){ const L=[];let c='';const m=Math.max(1,mc|0);for(let w of words){while(w.length>m){if(c){L.push(c);c='';}L.push(w.slice(0,m));w=w.slice(m);}if(!w)continue;if(!c)c=w;else if((c+' '+w).length<=m)c+=' '+w;else{L.push(c);c=w;}}if(c)L.push(c);return L; }
 const K=(p,i,f)=>p+':'+i+':'+f;
 const K0=(p,i)=>p+':'+i;
 function val(p,i,f,orig){ const k=K(p,i,f); return (k in edits)?edits[k]:orig; }

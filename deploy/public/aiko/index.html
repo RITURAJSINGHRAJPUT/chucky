@@ -304,7 +304,16 @@ const esc = s => s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;
 // monospace word-wrap to <= maxlines lines of <= maxchars
 function greedyWrap(words, maxchars){
   const lines=[]; let cur='';
-  for(const w of words){ if(!cur) cur=w; else if((cur+' '+w).length<=maxchars) cur+=' '+w; else { lines.push(cur); cur=w; } }
+  /* A token longer than the line can never be broken on a space. Left whole it ran clean off the
+     column and straight across the neighbouring ones on Capiche p1; sliced away by wrapDesc it
+     vanished instead. Neither is acceptable, so hard-break it at the line width. The menu has no
+     hyphenation, so a plain split is what the artwork itself does with long compound words. */
+  const mc=Math.max(1,maxchars|0);
+  for(let w of words){
+    while(w.length>mc){ if(cur){ lines.push(cur); cur=''; } lines.push(w.slice(0,mc)); w=w.slice(mc); }
+    if(!w) continue;
+    if(!cur) cur=w; else if((cur+' '+w).length<=mc) cur+=' '+w; else { lines.push(cur); cur=w; }
+  }
   if(cur) lines.push(cur); return lines;
 }
 // descriptions: natural greedy fill (shorter text just uses fewer lines)
@@ -467,6 +476,8 @@ function keepFont(sp, p){
   return keepState(pageText(p).slice(0,sp[1]));
 }
 
+const _pgRuns={};
+function runsFor(p){ if(_pgRuns[p]==null) _pgRuns[p]=_textRuns(pageStreams[p].pristine); return _pgRuns[p]; }
 const _divs={};
 function dividersFor(p){ if(_divs[p]==null) _divs[p]=_dividerLines(pageStreams[p].pristine); return _divs[p]; }
 function gapBelowF(f){         // usable room below: the nearer of the next field and the DIVIDER RULE
@@ -479,36 +490,163 @@ function gapBelowF(f){         // usable room below: the nearer of the next fiel
     const top=g.y+(g.size||7)*0.72;      // that field's glyphs rise ABOVE its baseline
     if(limit==null||top>limit) limit=top;
   }
+  /* Ink the FIELDMAP does not model is still a floor. Capiche has no header fields at all, so a
+     section heading sitting below a description was invisible here and the text was licensed to
+     grow straight over it (SALADS, p1). Read the pristine stream instead: that catches headings,
+     notes and art nothing else knows about. The field's own baked lines are skipped. */
+  const _ownBot=f.y-Math.abs(descLead(f)*f.size)*Math.max(0,((f.line_spans||[]).length-1))-0.5;
+  for(const r of runsFor(f.page)){
+    if(r.y==null||r.x==null||Math.abs(r.x-f.x)>60||r.y>=_ownBot) continue;
+    // Take the run's own em from its text matrix. A fixed 9pt guess under-measured the big red
+     // section headings by 10pt (SALADS renders a 19pt ink box), so a growing description was
+     // licensed to eat their clearance even though the reflow below it was correct.
+    const top=r.y+Math.max(FURNITURE_RISE, r.size||0);
+    if(limit==null||top>limit) limit=top;
+  }
   for(const d of dividersFor(f.page)){   // the rule between dishes is the real floor — never cross it
     if(d.y<f.y-0.5 && d.x-8<=f.x && f.x<=d.x+d.w+8 && (limit==null||d.y>limit)) limit=d.y;
   }
   return (f._gap = limit!=null ? (f.y-limit) : Math.abs(descLead(f)*f.size)*(f.line_spans.length+1));
 }
 const DESC_CLEAR=1.4;          // min clearance above the rule — matches the menu's own tightest baked spacing
-function maxLinesAt(f,sz){     // how many lines actually fit at this size (never fewer than baked)
+function maxLinesAt(f,sz,extra){ // how many lines actually fit at this size (never fewer than baked)
   const B=f.line_spans.length, lh=Math.abs(descLead(f)*sz);
+  // `extra` is the number of ADDITIONAL lines the column has agreed to pay for by pushing the
+  // dishes below this one down (see growPlan). It is granted, not measured, so it adds on top of
+  // whatever the pristine gap already affords. extra=0 reproduces the pre-growth behaviour exactly.
   // Cap growth at +2 lines: a big empty gap (last dish in a column) shouldn't license a
   // 9-line description, and that space can hold art/headers this map doesn't know about.
-  return Math.max(B, Math.min(B+2, 1+Math.floor((gapBelowF(f)-DESC_CLEAR)/lh)));
+  return Math.max(B, Math.min(B+2, (extra||0)+1+Math.floor((gapBelowF(f)-DESC_CLEAR)/lh)));
 }
-function fitDesc(f,val){       // use every line that fits; only then shrink the size
+function fitDesc(f,val,extra){  // use every line that fits; only then shrink the size
   const FLOOR=+(f.size*0.72).toFixed(3);
   let sz=f.size, mc=f.max_chars;
   for(let i=0;i<18;i++){
-    const w=wrapDesc(val, mc, maxLinesAt(f,sz));
+    const w=wrapDesc(val, mc, maxLinesAt(f,sz,extra));
     if(!w.overflow) return {lines:w.lines, size:sz, overflow:false};
     if(sz<=FLOOR) break;
     sz=Math.max(FLOOR,+(sz*0.94).toFixed(3));
     mc=Math.max(4, Math.floor(f.max_chars*f.size/sz));   // smaller glyphs -> more chars in the same width
   }
-  const w=wrapDesc(val, Math.max(4,Math.floor(f.max_chars*f.size/FLOOR)), maxLinesAt(f,FLOOR));
+  const w=wrapDesc(val, Math.max(4,Math.floor(f.max_chars*f.size/FLOOR)), maxLinesAt(f,FLOOR,extra));
   return {lines:w.lines, size:FLOOR, overflow:w.overflow};
 }
-function wrapFor(f,val){ if(f.role==='name') return wrapName(val,f.max_chars,f.lines.length); const t=fitDesc(f,val); return {lines:t.lines, overflow:t.overflow}; }
-function isOverflow(f,val){ return wrapFor(f,val).overflow; }
+/* REAL per-dish name budget. The baked `max_chars` is a legacy constant that does not describe the
+   space available: MARGHERITA carries 12 while its row actually holds 22, which is why typing
+   `MARGHERITA PI` was rejected. roomier-text-limits.md measured the opposite failure too — capiche
+   0:18 has max_chars=24 but ends PAST its own price. Measure it instead: from the name x to the
+   leftmost price to its RIGHT (same column), less the marker cluster the name must not run under.
+   The cluster slides right with a longer name (see the marker pass), so only its WIDTH is reserved.
+   Clamped with Math.max so this can only ever widen a budget, never narrow one. */
+const _nameBudget={};
+function nameBudgetChars(f){
+  if(_nameBudget[f.id]!=null) return _nameBudget[f.id];
+  const base=f.max_chars||12;
+  let px=null;
+  for(const q of FM.fields){
+    if(q.page!==f.page||q.role!=='price') continue;
+    const x=(q.tm_vals&&q.tm_vals[4]!=null)?q.tm_vals[4]:q.x;
+    if(x==null||x<=f.x) continue;                       // must be to the RIGHT (same column)
+    if(Math.abs(q.y-f.y)>8) continue;                   // and on this dish's own row
+    if(px==null||x<px) px=x;
+  }
+  if(px==null) return (_nameBudget[f.id]=base);
+  const C=(typeof AC!=='undefined'&&AC)||{}, adv=((typeof ADV!=='undefined'&&ADV&&ADV.name)||0.63);
+  const offs=(f.markers||f.baked||[]).map(m=>C['icon_'+(m==='jain'?'j':m)]).filter(Boolean);
+  const clusterW=offs.length? Math.max.apply(null,offs.map(o=>o[0]))+6 : 0;
+  const n=Math.floor((px-f.x-clusterW-8)/(adv*f.size));
+  return (_nameBudget[f.id]=Math.max(base, n));
+}
+function wrapFor(f,val,extra){ if(f.role==='name') return wrapName(val,nameBudgetChars(f),f.lines.length); const t=fitDesc(f,val,extra); return {lines:t.lines, overflow:t.overflow}; }
+function isOverflow(f,val,extra){ return wrapFor(f,val,extra).overflow; }
+/* ---------- GROWTH MODEL: how much room a column can lend a description that needs another line ----
+   Measured from the PRISTINE artwork. The floor is the top of the highest thing BELOW the dish flow
+   (the DAIRY/GLUTEN/JAIN legend is anchored to the page and must never be pushed), read from the
+   STREAM rather than FM.fields so art the fieldmap knows nothing about still counts. Deliberately
+   conservative: lending too little costs a line, lending too much prints over the legend. */
+const FURNITURE_RISE=9;        // text runs carry no size; this clears the largest chrome on either page
+const _colGeo={};
+function colGeo(p, col){
+  const k=p+'|'+col.x; if(_colGeo[k]!==undefined) return _colGeo[k];
+  const mine=FM.fields.filter(f=>f.page===p&&f.y!=null&&f.x>=col.min&&f.x<col.max&&
+    (f.role==='name'||f.role==='desc'||f.role==='grams'||f.role==='price'));
+  if(!mine.length) return (_colGeo[k]={floor:null,budget:0});
+  let flowBottom=Infinity;
+  for(const f of mine){
+    const ex=(f.role==='desc'&&f.line_spans)?Math.max(0,f.line_spans.length-1):0;
+    const y=f.y-(ex?Math.abs(descLead(f)*f.size)*ex:0);
+    if(y<flowBottom) flowBottom=y;
+  }
+  const b=pageStreams[p].pristine, inCol=x=> x!=null&&x>=col.min-6&&x<=col.max+6;
+  let floor=null;
+  for(const r of _textRuns(b)) if(inCol(r.x)&&r.y<flowBottom-2){ const t=r.y+FURNITURE_RISE; if(floor==null||t>floor) floor=t; }
+  for(const q of _leafQBlocks(b)) if(q.kind==='q'&&inCol(q.x)&&q.y!=null&&q.y<flowBottom-2&&(floor==null||q.y>floor)) floor=q.y;
+  if(floor==null) floor=18;                                    // nothing below it: keep a page margin
+  return (_colGeo[k]={floor:floor, budget:Math.max(0, flowBottom-floor-DESC_CLEAR)});
+}
+/* Which descriptions may grow, and by how much the dishes under them must then move.
+   D(f) = max(0, |lead|*size*(lines-1) + DESC_CLEAR - gapBelowF(f)) -- push by the OVERRUN, not by
+   whole line-heights. At extra=0 this is provably <= 0, so no edits => no growth => byte identity.
+   Resolved per column, TOP-DOWN in document order against one shared budget, which is what makes it
+   deterministic. It is also what stops the maths being circular: pushing the dish below down raises
+   this dish's own gapBelowF by exactly the push, so the binding constraint is the COLUMN FLOOR, not
+   the neighbour. */
+let _growSig=null, _growCache={};
+function growSig(){
+  return JSON.stringify([Object.keys(edits).sort().map(k=>k+'\u0001'+edits[k]),
+    [...removed].sort(), (typeof added!=='undefined'&&added)?added.length:0,
+    (typeof order!=='undefined')?order:0]);
+}
+function growPlan(p){
+  const sig=growSig(); if(sig!==_growSig){ _growSig=sig; _growCache={}; }
+  if(_growCache[p]) return _growCache[p];
+  const out={byDesc:{},extra:{},fit:{},over:{},left:{}};
+  for(const col of pageColumns(p)){
+    let remaining=colGeo(p,col).budget;
+    /* Added dishes spend from the SAME pot and are charged FIRST: a dish the user deliberately
+       added must never be pushed off the page by a description that merely wants to be roomier. */
+    if(typeof added!=='undefined'&&added.length&&typeof SECTIONS!=='undefined'&&SECTIONS){
+      for(const it of added){ const sec=SECTIONS[it.sec];
+        if(sec&&sec.page===p&&sec.col_x>=col.min&&sec.col_x<col.max) remaining-=(sec.slot||33); }
+    }
+    remaining=Math.max(0,remaining);
+    const descs=FM.fields.filter(f=>f.page===p&&f.role==='desc'&&f.x>=col.min&&f.x<col.max&&(f.id in edits))
+      .sort((a,b)=>b.y-a.y);                                    // top -> bottom, first to ask wins
+    for(const f of descs){
+      const val=edits[f.id], lead=Math.abs(descLead(f)), gap=gapBelowF(f);
+      let best=null;
+      for(let ex=0;ex<=2;ex++){
+        const fit=fitDesc(f,val,ex);
+        let n=fit.lines.length; while(n>0&&!fit.lines[n-1]) n--;
+        n=Math.max(f.line_spans.length,n);
+        const D=Math.max(0, lead*fit.size*(n-1)+DESC_CLEAR-gap);
+        if(D>remaining+1e-6) break;                             // unaffordable, and so is anything bigger
+        if(!best || (best.fit.overflow&&!fit.overflow) ||
+           (best.fit.overflow===fit.overflow && fit.size>best.fit.size)) best={fit:fit,D:D,ex:ex};
+      }
+      if(!best) best={fit:fitDesc(f,val,0), D:0, ex:0};         // cannot afford even one extra line
+      out.byDesc[f.id]=best.D; out.extra[f.id]=best.ex; out.fit[f.id]=best.fit; out.over[f.id]=!!best.fit.overflow;
+      remaining=Math.max(0, remaining-best.D);
+    }
+    out.left[col.x]=remaining;
+  }
+  return (_growCache[p]=out);
+}
+
 
 function spliceBytes(src, ops){
   ops = ops.slice().sort((a,b)=>a.s-b.s);
+  /* ONE forward cursor walks src, so two ops covering the same bytes drive it BACKWARDS and the
+     stream corrupts from that point on — every dish below vanishes. This has bitten three times
+     (label vector overlay vs flourish_cm, badge vs leaf-block, strayRowIcons vs badge_span), each
+     time surfacing only as "syntax error: unknown keyword" in a viewer. Drop the later op and say
+     so: a missing tweak is recoverable, a corrupt content stream is not. */
+  { const keep=[]; let end=-1;
+    for(const o of ops){
+      if(o.s<end){ try{console.warn('spliceBytes: dropped overlapping op ['+o.s+','+o.e+') — previous op ends at '+end);}catch(_){ } continue; }
+      keep.push(o); end=o.e;
+    }
+    ops=keep; }
   let outLen = src.length + ops.reduce((d,o)=>d+(o.rep.length-(o.e-o.s)),0);
   const out=new Uint8Array(outLen); let si=0, oi=0;
   for(const o of ops){ out.set(src.subarray(si,o.s),oi); oi+=o.s-si; out.set(o.rep,oi); oi+=o.rep.length; si=o.e; }
@@ -586,7 +724,7 @@ function _textRuns(b){
     else if(op==='ET'){ close(); inBT=false; }
     else if(op==='Tm'&&inBT){
       const a=nb.slice(-6).map(x=>_nv(b,x));
-      if(a.length===6&&nb.length>=6){ close(); cur={span:[nb[nb.length-6].s,k.e],x:a[4],y:a[5],draw:0}; }
+      if(a.length===6&&nb.length>=6){ close(); cur={span:[nb[nb.length-6].s,k.e],x:a[4],y:a[5],size:Math.abs(a[0])||0,draw:0}; }
     }
     else if(cur&&(op==='Tj'||op==='TJ'||op==="'"||op==='"')) cur.draw=k.e;
     nb.length=0;
@@ -622,18 +760,66 @@ function pageColumns(p){
   return gx.map((x,i)=>({x,min:x-12,max:(i<gx.length-1?gx[i+1]-12:W+20)}));
 }
 // per-page structural ops from the removed set
-let _structCache={sig:null,byPage:{}};
 function structuralForPage(p, pristine){
   const removedHere=FM.fields.filter(f=>f.page===p&&f.role==='name'&&removed.has(f.id));
   const reorderHere=Object.keys(order).some(k=>k.split('|')[0]==String(p)&&order[k]&&order[k].length);
-  if(!removedHere.length&&!reorderHere) return {deletes:[],shiftOps:[],priceShift:{},skip:new Set()};
+  /* A description that needs another line is structural too: the dishes under it have to move down
+     to make the room. growPlan already decided how far, bounded by the column's own budget. With no
+     edits nothing grows, so this early return is unchanged and empty exports stay byte-identical. */
+  const _G=growPlan(p), _grew=Object.keys(_G.byDesc).some(id=>_G.byDesc[id]>0.0005);
+  if(!removedHere.length&&!reorderHere&&!_grew) return {deletes:[],shiftOps:[],priceShift:{},skip:new Set(),fieldShift:{},growSlots:[]};
   const blocks=_leafQBlocks(pristine), anchors=_anchors(pristine), runs=_textRuns(pristine);
   const cols=pageColumns(p);
   const priceTm=FM.fields.filter(f=>f.page===p&&f.role==='price');
-  const deletes=[], shiftOps=[], priceShift={}, removedSlots=[]; const skip=new Set();
+  const deletes=[], shiftOps=[], priceShift={}, removedSlots=[], growSlots=[], fieldShift={}; const skip=new Set();
+  const _descByName={};   // name id -> its desc field, for reading growth per row
+  for(const it of itemsForPage(p).items) if(it.name&&it.desc) _descByName[it.name.id]=it.desc;
+  /* TM OWNERSHIP. A shift rewrites only the 6th operand of a Tm/cm. opsForPage, by contrast,
+     rewrites a WHOLE matrix (or a whole run) for fields it edits — and those whole-matrix spans
+     CONTAIN the operand this loop wants to patch. Emitting both puts two ops over one range, which
+     spliceBytes cannot honour. Rule: if a field is edited, opsForPage owns its y and we hand the
+     delta over in fieldShift; otherwise this function owns the raw operand.
+     Grams is the exception — opsForPage rewrites the grams matrix whenever the PAIRED DESC is
+     edited, so grams is routed on the desc's edit state, never its own. */
+  const ownedSpans=[];
+  for(const f of FM.fields){
+    if(f.page!==p || !(f.id in edits)) continue;
+    if(f.role==='name'){
+      // a renamed dish slides its allergen cluster sideways, so the marker pass owns those stamps
+      for(const sp of (f.marker_stamps||[])) ownedSpans.push({s:sp[0],e:sp[1],id:f.id});
+    } else if(f.role==='desc'){
+      const sp=descTm(f); if(sp) ownedSpans.push({s:sp.s,e:sp.e,id:f.id});
+      const gf=(typeof gramsForDesc==='function')?gramsForDesc(f):null;      // Aiko only
+      if(gf){ const gs=gramsTm(gf); if(gs) ownedSpans.push({s:gs.s,e:gs.e,id:gf.id}); }
+    } else if(f.role==='header' && f.run_span){
+      ownedSpans.push({s:f.run_span[0],e:f.run_span[1],id:f.id});
+      const vs=labelVectorSpan(f); if(vs) ownedSpans.push({s:vs[0],e:vs[1],id:f.id});
+      // renaming a serif word MOVES its decorative label, so opsForPage owns that label's run and
+      // its stroked overlay as well, even though the label itself was never edited
+      const pf=f.pair && FM.fields.find(q=>q.id===f.pair);
+      if(pf && pf.run_span && !(pf.id in edits)){
+        ownedSpans.push({s:pf.run_span[0],e:pf.run_span[1],id:pf.id});
+        const pvs=labelVectorSpan(pf); if(pvs) ownedSpans.push({s:pvs[0],e:pvs[1],id:pf.id});
+      }
+    }
+  }
+  /* ACCUMULATE, never push twice for one anchor. A removal and a reorder inside the same section
+     both legitimately move the same Tm; two separate ops on one operand is the same corruption the
+     ownership rule above avoids. Sum the deltas and emit exactly one op per anchor. */
+  const _shiftAcc=new Map();
+  const addShift=(a,d)=>{ const k=a.s+':'+a.e, cur=_shiftAcc.get(k);
+    if(cur) cur.d+=d; else _shiftAcc.set(k,{s:a.s,e:a.e,y:a.y,d:d}); };
+  const routeShift=(a,d)=>{
+    const pf=priceTm.find(q=>a.s>=q.tm_span[0]&&a.e<=q.tm_span[1]);   // composed with right-align
+    if(pf){ priceShift[pf.id]=(priceShift[pf.id]||0)+d; return; }
+    const ow=ownedSpans.find(o=>a.s>=o.s&&a.e<=o.e);
+    if(ow){ fieldShift[ow.id]=(fieldShift[ow.id]||0)+d; return; }
+    addShift(a,d);
+  };
   for(const col of cols){
     const removedYs=removedHere.filter(f=>f.x>=col.min&&f.x<col.max).map(f=>f.y);
-    if(!removedYs.length) continue;
+    const colGrows=FM.fields.some(f=>f.page===p&&f.role==='desc'&&f.x>=col.min&&f.x<col.max&&_G.byDesc[f.id]>0.0005);
+    if(!removedYs.length&&!colGrows) continue;
     const colNameYs=FM.fields.filter(f=>f.page===p&&f.role==='name'&&f.x>=col.min&&f.x<col.max).map(f=>f.y);
     // NAME-ANCHORED clustering: assign every block in the column to its nearest name
     // baseline. Robust regardless of inter-item gap — Aiko items sit ~33pt apart with a
@@ -673,14 +859,21 @@ function structuralForPage(p, pristine){
     // height from the wrong section. dividerOps/appendedForPage already cascade this way; this brings
     // the text/header anchor path in line with them.
     const _secOrder=[]; _rowSec.forEach(s=>{ if(s!=null&&_secOrder.indexOf(s)<0) _secOrder.push(s); });
-    const _secShrink={};
+    // how far each row's OWN description pushes everything beneath it (0 for all rows when nothing
+    // is edited, which is what keeps an empty export byte-identical)
+    const _rowGrow=_rowId.map(id=>{ const d=id!=null&&_descByName[id]; return (d&&_G.byDesc[d.id])||0; });
+    const _secShrink={}, _secGrow={};
     for(const k of remSet){ const s=_rowSec[k]; if(s==null) continue; _secShrink[s]=(_secShrink[s]||0)+slotH(k); }
+    _rowGrow.forEach((g,i)=>{ const s=_rowSec[i]; if(g>0&&s!=null) _secGrow[s]=(_secGrow[s]||0)+g; });
     const _secOffset={}; let _running=0;
-    for(const s of _secOrder){ _secOffset[s]=_running; _running+=(_secShrink[s]||0); }
+    for(const s of _secOrder){ _secOffset[s]=_running; _running+=(_secShrink[s]||0)-(_secGrow[s]||0); }
     // removals in the SAME section push a dish up its own stack; removals in an EARLIER section
     // (same column) push the whole section up via _secOffset
+    // + moves UP (a removal closed a gap), - moves DOWN (a description above claimed more room).
+    // A row's OWN growth never moves the row itself, only what is stacked under it.
     const shiftFor=j=>{ let d=0;
       for(const k of remSet){ if(k<j && _rowSec[k]!=null && _rowSec[k]===_rowSec[j]) d+=slotH(k); }
+      for(let k=0;k<j;k++){ if(_rowGrow[k]>0 && _rowSec[k]!=null && _rowSec[k]===_rowSec[j]) d-=_rowGrow[k]; }
       d+=_secOffset[_rowSec[j]]||0;
       return d; };
     // DELETE per RUN, not per block: only the text runs the removed dish actually owns. The block's
@@ -705,16 +898,20 @@ function structuralForPage(p, pristine){
     const flowBottom = ny.length? ny[ny.length-1]-slotH(ny.length-1) : 0;
     for(const a of anchors){
       if(a.x===null||a.y===null||a.x<col.min||a.x>col.max) continue;
-      if(a.y<flowBottom) continue;                       // page furniture, not in the dish flow
+      // 0.05 epsilon: `a.y` is the stream operand (4dp) but flowBottom is built from the fieldmap's
+      // round2 y (2dp). BURRATA SALAD's name Tm is 210.2057 against a flowBottom of 210.21, so a
+      // hard `<` threw the NAME away as page furniture while its markers — which sit above the
+      // baseline — shifted normally, and the J landed on the description.
+      if(a.y<flowBottom-0.05) continue;                  // page furniture, not in the dish flow
       const j=cidx(a.y);                                 // positional: chrome reflows too
       if(remSet.has(j)&&owner(a.y)>=0) continue;         // being deleted with its dish
       const d=shiftFor(j);
-      if(d<=0) continue;
-      // if this Tm is a price Tm, defer to price handling (compose with right-align)
-      const pf=priceTm.find(pf=>a.s>=pf.tm_span[0]&&a.e<=pf.tm_span[1]);
-      if(pf){ priceShift[pf.id]=(priceShift[pf.id]||0)+d; }
-      else shiftOps.push({s:a.s,e:a.e,rep:enc(fmtNum(a.y+d))});
+      if(Math.abs(d)<5e-4) continue;                     // was `d<=0` — growth shifts are negative
+      routeShift(a,d);
     }
+    // rules/art below a grown description ride down with the dishes (Capiche only in practice —
+    // Aiko's artwork has no divider rules at all)
+    _rowGrow.forEach((g,i)=>{ if(g>0) growSlots.push({cmin:col.min,cmax:col.max,y:top(i),h:g}); });
   }
   /* ---- REORDER WITHIN A SECTION -------------------------------------------------------------
      A dish is RELOCATED, never retyped: we shift every run it owns by one delta. That is why this
@@ -738,31 +935,35 @@ function structuralForPage(p, pristine){
         // text runs reach a slot below the name; artwork sits just ABOVE it and must not be
         // claimed from the dish below (see _ownsArt)
         const own=(y,kind)=> kind==='cm'? _ownsArt(ny,y) : _ownsRun(ny,y,h);
+        // Ownership above is judged on Y ALONE, so without a column guard reordering SIDES (top y
+        // 695.03) also claims DIMSUM's name Tm at y 691.98 in the other column.
+        const ncol=cols.find(c=>nf.x>=c.min&&nf.x<c.max);
         for(const a of anchors){
           if(a.x===null||a.y===null) continue;
+          if(ncol&&(a.x<ncol.min||a.x>ncol.max)) continue;
           if(!own(a.y,a.kind)) continue;
-          // a price's y and its right-align x are composed in ONE rewrite of tm_span by opsForPage,
-          // so route it there instead of touching the raw operand (they would collide)
-          const pf=priceTm.find(pf=>a.s>=pf.tm_span[0]&&a.e<=pf.tm_span[1]);
-          if(pf){ priceShift[pf.id]=(priceShift[pf.id]||0)+d; continue; }
-          shiftOps.push({s:a.s,e:a.e,rep:enc(fmtNum(a.y+d))});
+          routeShift(a,d);
         }
       }
     }
   }
   // mark removed items' field ids to skip in text edits
   for(const nf of removedHere) skip.add(nf.id);
-  return {deletes,shiftOps,priceShift,skip,removedSlots};
+  for(const v of _shiftAcc.values()) if(Math.abs(v.d)>5e-4) shiftOps.push({s:v.s,e:v.e,rep:enc(fmtNum(v.y+v.d))});
+  return {deletes,shiftOps,priceShift,skip,removedSlots,growSlots,fieldShift};
 }
 
-function opsForPage(fields, priceShift, skip){
-  priceShift = priceShift||{}; 
+function opsForPage(fields, priceShift, skip, fieldShift){
+  priceShift = priceShift||{}; fieldShift = fieldShift||{};
   const ops=[];
   for(const f of fields){
     if(skip && skip.has(f.id)) continue;
     const hasEdit = (f.id in edits);
     const yShift = (f.role==='price') ? (priceShift[f.id]||0) : 0;
-    if(!hasEdit && !yShift) continue;
+    // A decorative label moves when its PAIRED serif word is renamed, so it has to be visited even
+    // though nothing edited the label itself.
+    const pairMove = f.role==='header' && f.kind==='script' && f.pair && (f.pair in edits);
+    if(!hasEdit && !yShift && !pairMove && !(fieldShift[f.id])) continue;
     const val = hasEdit ? edits[f.id] : f.text;
     if(f.role==='price'){
       if(hasEdit) ops.push({s:f.tj_span[0],e:f.tj_span[1],rep:enc('('+escPdf(val)+')')});
@@ -774,21 +975,28 @@ function opsForPage(fields, priceShift, skip){
         ops.push({s:f.tm_span[0],e:f.tm_span[1],rep:enc([a,b,c,d,(digitChange?nx:x),(ff+yShift)].map(fmtNum).join(' '))});
       }
     } else if(f.role==='name'){
-      const {lines}=wrapName(val, f.max_chars, f.lines.length);
+      // budget, not the legacy max_chars — the UI gate and the emitter must agree or the field
+      // accepts text it then silently truncates
+      const {lines}=wrapName(val, nameBudgetChars(f), f.lines.length);
       f.lines.forEach((pieces,i)=>{
         ops.push({s:pieces[0][0],e:pieces[0][1],rep:enc('('+escPdf(lines[i]||'')+')')});
         for(let k=1;k<pieces.length;k++) ops.push({s:pieces[k][0],e:pieces[k][1],rep:enc('()')});
       });
       for(const td of f.td_spans){ if(td[2]) continue; ops.push({s:td[0],e:td[1],rep:enc('0 0')}); }
     } else if(f.role==='desc'){
-      const fit=fitDesc(f, val);
+      // take the plan's own fit, so the lines we emit and the room we asked the column for can
+      // never disagree (recomputing here would silently drift from the shift arithmetic)
+      const fit=growPlan(f.page).fit[f.id]||fitDesc(f, val);
       const B=f.line_spans.length;
       let lines=fit.lines.slice();
       let last=lines.length; while(last>0 && !lines[last-1]) last--;      // drop trailing blanks
       const n=Math.max(B,last); lines=lines.slice(0,n); while(lines.length<n) lines.push('');
-      if(Math.abs(fit.size-f.size)>0.005){                                 // auto-shrink -> swap the Tm size
+      // structuralForPage hands us the reflow delta for this block rather than patching the ty
+      // operand itself, because the span we rewrite below CONTAINS that operand (see TM OWNERSHIP)
+      const _dy=fieldShift[f.id]||0;
+      if(Math.abs(fit.size-f.size)>0.005 || _dy){                          // auto-shrink -> swap the Tm size
         const tm=descTm(f);
-        if(tm) ops.push({s:tm.s,e:tm.e,rep:enc(fmtNum(fit.size)+' 0 0 '+fmtNum(fit.size)+' '+fmtNum(tm.x)+' '+fmtNum(tm.y)+' Tm')});
+        if(tm) ops.push({s:tm.s,e:tm.e,rep:enc(fmtNum(fit.size)+' 0 0 '+fmtNum(fit.size)+' '+fmtNum(tm.x)+' '+fmtNum(tm.y+_dy)+' Tm')});
       }
       const lead=descLead(f);
       f.line_spans.forEach((sp,i)=>{
@@ -809,26 +1017,44 @@ function opsForPage(fields, priceShift, skip){
         const _rt=s=>String(s).replace(/\s+$/,'').length+1;
         const _bLast=bakedDescLine(f,_bi), _nLast=lines[_li]||'';
         const _nx=_gf.x + ADV.desc*(fit.size*_rt(_nLast) - f.size*_rt(_bLast));
-        const _ny=_gf.y + lead*(fit.size*_li - f.size*_bi);
+        const _ny=_gf.y + lead*(fit.size*_li - f.size*_bi) + (fieldShift[_gf.id]||0);
         if(Math.abs(_nx-_gf.x)>0.005 || Math.abs(_ny-_gf.y)>0.005){
           const _v=_gtm.v.slice(); _v[4]=_nx; _v[5]=_ny;
           ops.push({s:_gtm.s,e:_gtm.e,rep:enc(_v.map(fmtNum).join(' ')+' Tm')});
         }
       }
     } else if(f.role==='header'){
-      if(!hasEdit) continue;
-      /* Headers are drawn per kerning group — (Ri)Tj 0 Tc 0 Tw (c)Tj 1.471 0 Td (e)Tj — so patching
-         the string literals would leave the stale Td offsets behind. Replace the WHOLE run with one
-         Tm + Tj. The gold `rg` and the /TTn Tf sit BETWEEN the two runs, so they are untouched. */
-      const w=headerAdv(f, val), w0=headerAdv(f, f.display);
+      const _hdy=fieldShift[f.id]||0;
+      /* A decorative label is positioned by its paired serif word's RIGHT EDGE, so renaming the
+         serif word has to move the label too. This used to bail out unless the LABEL ITSELF was
+         edited, so "Sides" -> "Sides moin" left "Starters" sitting where it was and the widened
+         word slid straight underneath it. */
+      const _pairEdited = f.kind==='script' && f.pair && (f.pair in edits);
+      if(!hasEdit && !_pairEdited && !_hdy) continue;
       let hx=f.x;
       if(f.kind==='script'){                       // keep its offset from the serif word's right edge
         const sf=FM.fields.find(q=>q.id===f.pair);
         if(sf){ const sv=(sf.id in edits)?edits[sf.id]:sf.display;
                 hx=f.x + (headerAdv(sf,sv)-headerAdv(sf,sf.display)); }
       }
+      if(!hasEdit){
+        /* MOVE ONLY — the word is unchanged. Slide the baked run and its stroked overlay by the
+           same delta instead of retyping (see headerTmSpan): that keeps the filled text and the
+           gold outline in exact register, and keeps the artwork the designer drew. */
+        const _dx=hx-f.x;
+        if(Math.abs(_dx)>0.005 || Math.abs(_hdy)>0.005){
+          const _tm=headerTmSpan(f);
+          if(_tm) ops.push({s:_tm.s,e:_tm.e,rep:enc(fmtNum(hx)+' '+fmtNum(f.y+_hdy))});
+          const _mv=labelVectorSpan(f);
+          if(_mv) ops.push({s:_mv[0],e:_mv[1],rep:enc(shiftArtOrigins(pageText(f.page).slice(_mv[0],_mv[1]), _dx, _hdy))});
+        }
+        continue;
+      }
+      /* Headers are drawn per kerning group — (Ri)Tj 0 Tc 0 Tw (c)Tj 1.471 0 Td (e)Tj — so patching
+         the string literals would leave the stale Td offsets behind. Replace the WHOLE run with one
+         Tm + Tj. The gold `rg` and the /TTn Tf sit BETWEEN the two runs, so they are untouched. */
       ops.push({s:f.run_span[0],e:f.run_span[1],
-        rep:enc(fmtNum(f.size)+' 0 0 '+fmtNum(f.size)+' '+fmtNum(hx)+' '+fmtNum(f.y)+' Tm\n0 Tc 0 Tw\n('+escPdf(val)+')Tj')});
+        rep:enc(fmtNum(f.size)+' 0 0 '+fmtNum(f.size)+' '+fmtNum(hx)+' '+fmtNum(f.y+(fieldShift[f.id]||0))+' Tm\n0 Tc 0 Tw\n('+escPdf(val)+')Tj')});
       /* A decorative label exists TWICE in the artwork: as this /TT2 text run AND as stroked vector
          letterforms drawn on top of it (8 `q..Q` groups and ~15.5KB for "Starters" alone, spanning
          exactly the word's x-range). Editing only the text left the old word's outline in place, so
@@ -870,6 +1096,56 @@ function descWidthFor(sec){           // chars per desc line for a section (mono
   const C=AC, w=(sec.price_right||sec.col_x+233)-sec.col_x-14;
   return Math.max(20, Math.floor(w/(C.adv_name*C.desc_size)));
 }
+/* THE KOREA FLAG IS REAL ARTWORK, not one of the extracted ICONS templates: two path groups that
+   share a single origin (red 0.773 0.125 0.196, then blue 0.133 0.227 0.455), each preceded by its
+   own `rg`. Redrawing it from primitives never matches the mark the menu actually prints, so lift
+   the designer's own bytes out of the pristine stream and re-stamp those verbatim.
+   Placement is SELF-CALIBRATED from the donor dish, so nothing new has to be baked into the
+   fieldmap: replay the donor's own cluster advance, then measure where its flag really sat. */
+let _koreaTpl;
+function koreaTemplate(){
+  if(_koreaTpl!==undefined) return _koreaTpl;
+  const C=AC, geo=(C&&C.marker_geo)||{}, order=(C&&C.marker_order)||(BRAND.markers||[]);
+  const gap=(C&&C.icon_gap!=null)?C.icon_gap:1.7;
+  for(const f of FM.fields){
+    if(f.role!=='name'||!(f.baked||[]).includes('korea')||f.marker_bx==null) continue;
+    const sp=f.marker_stamps||[], t=pageText(f.page);
+    const org=s=>{ const m=/q 1 0 0 1 (-?[\d.]+) (-?[\d.]+) cm/.exec(t.slice(s[0],s[1])); return m?[+m[1],+m[2]]:null; };
+    const col=s=>{ const m=/([\d.]+ [\d.]+ [\d.]+) rg\s*$/.exec(t.slice(Math.max(0,s[0]-40), s[0])); return m?m[1]:null; };
+    for(let i=0;i<sp.length-1;i++){
+      const a=org(sp[i]), b=org(sp[i+1]);
+      if(!a||!b||Math.abs(a[0]-b[0])>0.01||Math.abs(a[1]-b[1])>0.01) continue;   // the two halves
+      const c1=col(sp[i]), c2=col(sp[i+1]); if(!c1||!c2) continue;
+      const parts=[[c1,t.slice(sp[i][0],sp[i][1])],[c2,t.slice(sp[i+1][0],sp[i+1][1])]];
+      /* Measure the artwork's real ink box rather than trusting the cm origin — the origin is an
+         arbitrary anchor inside the glyph, not its left edge, so aligning `cur` to it made the flag
+         sit back on top of the sesame icon. Path operands are all coordinate PAIRS relative to the
+         origin (m/l take one, c takes three), so every even-indexed number is an x. */
+      let minX=Infinity, maxX=-Infinity, minY=Infinity;
+      for(const [,body] of parts){
+        const nums=(body.replace(/q 1 0 0 1 -?[\d.]+ -?[\d.]+ cm/,'').match(/-?\d+(?:\.\d+)?/g)||[]).map(Number);
+        for(let n=0;n<nums.length-1;n+=2){
+          if(nums[n]<minX) minX=nums[n];
+          if(nums[n]>maxX) maxX=nums[n];
+          if(nums[n+1]<minY) minY=nums[n+1];
+        }
+      }
+      if(!isFinite(minX)){ minX=0; maxX=(geo.korea||{}).w||7; minY=0; }
+      return (_koreaTpl={ minX:minX, w:maxX-minX, dy:a[1]-f.y, parts:parts });
+    }
+  }
+  return (_koreaTpl=null);
+}
+function koreaStamp(cur, baseline, g){
+  const T=koreaTemplate();
+  // no baked flag to copy: fall back to the drawn taegeuk
+  if(!T) return 'q 1 0 0 1 '+jFmt(cur-(g.ox||0))+' '+jFmt(baseline+(g.dy||0))+' cm\n'+flagBody('korea')+'Q\n';
+  const x=cur-T.minX, y=baseline+T.dy;             // align the artwork's LEFT INK EDGE to the cursor
+  let out='q\n';                                   // its own q..Q so its fills never leak onward
+  for(const [c,body] of T.parts)
+    out+=c+' rg\n'+body.replace(/q 1 0 0 1 -?[\d.]+ -?[\d.]+ cm/, 'q 1 0 0 1 '+jFmt(x)+' '+jFmt(y)+' cm')+'\n';
+  return out+'Q\n';
+}
 // pack allergen icons left->right from cursor bx, advancing only for present ones
 function markerBody(al, bx, baseline){
   const C=AC, geo=C.marker_geo||{}, order=C.marker_order||(BRAND.markers||[]);
@@ -878,16 +1154,23 @@ function markerBody(al, bx, baseline){
   for(const m of order){
     if(!set.has(m)) continue;
     const g=geo[m]||{dy:0,ox:0,w:8};
-    if(m==='korea'){   // drawn from vector primitives, not an extracted ICONS template
-      const x=cur-(g.ox||0), y=baseline+(g.dy||0);
-      body+='q 1 0 0 1 '+jFmt(x)+' '+jFmt(y)+' cm\n'+flagBody('korea')+'Q\n';
-      cur+=(g.w||8)+gap; continue;
+    if(m==='korea'){   // the menu's own flag artwork, re-stamped verbatim (see koreaTemplate)
+      const kt=koreaTemplate();
+      body+=koreaStamp(cur, baseline, g);
+      cur+=((kt&&kt.w)||g.w||8)+gap;               // advance by the artwork's measured width
+      continue;
     }
     if(!ICONS||!ICONS[m]) continue;
     body+=jStamp(ICONS[m], cur-(g.ox||0), baseline+(g.dy||0));   // align icon's visual left to cur
     cur+=(g.w||8)+gap;                                            // advance by real icon width
   }
-  return body;
+  if(!body) return '';
+  /* No ICONS template carries a fill colour of its own, so an appended cluster inherits whatever
+     the page's last drawing op left set — gold, on a page that ends with a decorative label, which
+     is how an added gluten icon came out yellow. Pin the menu's ink colour at the top of the
+     cluster. The NEW badge and the Korea flag set their own colours inside their own q..Q, so
+     neither leaks into whatever is stamped after them. */
+  return ((C&&C.ink_color)||'0 g')+'\n'+body;
 }
 // standalone clip-wrapped marker group (for re-stamping an existing item on allergen toggle)
 function markerGroup(al, bx, baseline, page){
@@ -896,7 +1179,12 @@ function markerGroup(al, bx, baseline, page){
   return '\nq\n0 '+jFmt(sz[1])+' '+jFmt(sz[0])+' '+jFmt(-sz[1])+' re\nW n\n'+body+'Q\n';
 }
 // how far an item shifts up when items above it in the same column were removed
-function itemShift(f, removedSlots){ let d=0; for(const rs of (removedSlots||[])){ if(f.x>=rs.cmin && f.x<rs.cmax && rs.y>f.y) d+=Math.abs(rs.h); } return d; }
+// Net vertical travel of a dish: removals above pull it UP, descriptions above that claimed another
+// line push it DOWN. Re-stamped allergen clusters ride on this, so both terms have to be here.
+function itemShift(f, removedSlots, growSlots){ let d=0;
+  for(const rs of (removedSlots||[])){ if(f.x>=rs.cmin && f.x<rs.cmax && rs.y>f.y) d+=Math.abs(rs.h); }
+  for(const gs of (growSlots||[])){ if(f.x>=gs.cmin && f.x<gs.cmax && gs.y>f.y) d-=Math.abs(gs.h); }
+  return d; }
 
 // ---- cuisine-origin flags: tiny PDF-native flags drawn from authored shapes ----
 // ROUND flag roundels — exact replica of the menu's Korea taegeuk: Ø≈6.7pt, centre 4.6pt above baseline
@@ -907,17 +1195,35 @@ function _circ(cx,cy,r){ const k=0.5523*r,P=(a,b,c,d,e,f)=>[a,b,c,d,e,f].map(jFm
 function _star(cx,cy,r){ let pts=''; for(let i=0;i<10;i++){ const ang=-Math.PI/2+i*Math.PI/5, rad=i%2?r*0.42:r; const x=cx+rad*Math.cos(ang), y=cy+rad*Math.sin(ang); pts+=(i?' '+jFmt(x)+' '+jFmt(y)+' l':jFmt(x)+' '+jFmt(y)+' m'); } return pts+' h'; }
 function _halfdisk(cx,cy,r,top){ const k=0.5523*r,P=(a,b,c,d,e,f)=>[a,b,c,d,e,f].map(jFmt).join(' ')+' c'; const s=top?1:-1;
   return jFmt(cx-r)+' '+jFmt(cy)+' m '+P(cx-r,cy+s*k,cx-k,cy+s*r,cx,cy+s*r)+' '+P(cx+k,cy+s*r,cx+r,cy+s*k,cx+r,cy)+' h'; }
+/* The Korean taegeuk's lobes meet along an S built from two half-circles of radius r/2 — NOT the
+   straight diameter _halfdisk gives, which read as a flat red-over-blue disc and did not match the
+   taegeuk the designer baked into the artwork. This is the RED (upper) lobe only: it rides over a
+   full blue disc, so the two always share an exact seam. Red dips below the axis on the right and
+   yields the left lobe to blue, matching the baked flag. */
+function _taeguk(cx,cy,r){ const h=r/2, k=0.5523*r, kh=0.5523*h;
+  const P=(a,b,c,d,e,f)=>[a,b,c,d,e,f].map(jFmt).join(' ')+' c';
+  return jFmt(cx-r)+' '+jFmt(cy)+' m '
+    + P(cx-r,cy+k,    cx-k,cy+r,    cx,cy+r)    + ' '   // over the top, left to right
+    + P(cx+k,cy+r,    cx+r,cy+k,    cx+r,cy)    + ' '
+    + P(cx+r,cy-kh,   cx+h+kh,cy-h, cx+h,cy-h)  + ' '   // dip under the axis on the right
+    + P(cx+h-kh,cy-h, cx,cy-kh,     cx,cy)      + ' '
+    + P(cx,cy+kh,     cx-h+kh,cy+h, cx-h,cy+h)  + ' '   // arc over the left lobe, leaving it blue
+    + P(cx-h-kh,cy+h, cx-r,cy+kh,   cx-r,cy)    + ' h'; }
 function flagBody(c){
   // circle centre at (FR, FCY); content fills its bbox and is clipped to the circle
   const CX=FR, CY=FCY, L=CX-FR, B=CY-FR, D=FD;
   const f=(col,p)=>col+' rg\n'+p+'\nf\n';
+  /* Korea is not a rectangular flag squeezed into a circle — in the baked artwork the taegeuk IS
+     the whole icon: full-bleed, no white field, no border ring. Drawing it like the others left a
+     small disc rattling inside a grey ring, which is not what the printed menu shows. */
+  if(c==='korea') return f('0.13 0.23 0.46',_circ(CX,CY,FR))+f('0.8 0.18 0.23',_taeguk(CX,CY,FR));
   let s='q\n'+_circ(CX,CY,FR)+'\nW n\n';                 // clip to circle
   if(c==='japan'){ s+=f('1 1 1',_re(L,B,D,D))+f('0.74 0 0.18',_circ(CX,CY,FR*0.55)); }
   else if(c==='china'){ s+=f('0.85 0.16 0.08',_re(L,B,D,D))+f('1 0.87 0',_star(CX,CY,FR*0.82)); }
   else if(c==='thailand'){ s+=f('0.62 0.1 0.2',_re(L,B,D,D))+f('0.97 0.97 0.98',_re(L,B+D*0.18,D,D*0.64))+f('0.13 0.16 0.34',_re(L,B+D*0.36,D,D*0.28)); }
   else if(c==='india'){ s+=f('1 0.6 0.2',_re(L,B+D*2/3,D,D/3))+f('1 1 1',_re(L,B+D/3,D,D/3))+f('0.05 0.53 0.03',_re(L,B,D,D/3))+'0.05 0.29 0.64 RG 0.35 w\n'+_circ(CX,CY,FR*0.34)+'\nS\n'; }
   else if(c==='srilanka'){ s+=f('1 0.74 0.16',_re(L,B,D,D))+f('0 0.33 0.3',_re(L,B,D*0.22,D))+f('0.93 0.45 0',_re(L+D*0.22,B,D*0.16,D))+f('0.55 0.13 0.16',_re(L+D*0.42,B,D*0.58,D))+f('1 0.74 0.16',_circ(L+D*0.7,CY,FR*0.4)); }
-  else if(c==='korea'){ s+=f('1 1 1',_re(L,B,D,D))+f('0.8 0.18 0.23',_halfdisk(CX,CY,FR*0.62,true))+f('0.13 0.23 0.46',_halfdisk(CX,CY,FR*0.62,false)); }
+  else if(c==='korea'){ s+=f('1 1 1',_re(L,B,D,D))+f('0.13 0.23 0.46',_circ(CX,CY,FR*0.62))+f('0.8 0.18 0.23',_taeguk(CX,CY,FR*0.62)); }
   s+='Q\n';                                              // end clip
   s+='0.42 0.4 0.36 RG\n0.35 w\n'+_circ(CX,CY,FR)+'\nS\n';   // round border
   return s;
@@ -983,7 +1289,7 @@ function buildItemJS(it, sec, Y){
   const sz=PAGES[sec.page]||[595.276,841.89], W=sz[0], H=sz[1];
   return '\nq\n0 '+jFmt(H)+' '+jFmt(W)+' '+jFmt(-H)+' re\nW n\n'+p.join('\n')+'\nQ\n';
 }
-function appendedForPage(p, removedSlots){
+function appendedForPage(p, removedSlots, growSlots){
   if(!added.length) return '';
   let bySec={};
   added.forEach(it=>{ const s=SECTIONS[it.sec]; if(s && s.page===p){ (bySec[it.sec]=bySec[it.sec]||[]).push(it); } });
@@ -992,12 +1298,26 @@ function appendedForPage(p, removedSlots){
     const sec=SECTIONS[si];
     let shift=0;  // ride the same reflow as the section's items when something above was removed
     for(const rs of (removedSlots||[])){ if(sec.col_x>=rs.cmin && sec.col_x<rs.cmax && rs.y>sec.last_y) shift+=Math.abs(rs.h); }
+    /* ...and a description ABOVE that claimed another line pushes the append point down by exactly
+       as much, or the new dish lands on top of the one it is supposed to follow. */
+    for(const gs of (growSlots||[])){ if(sec.col_x>=gs.cmin && sec.col_x<gs.cmax && gs.y>sec.last_y) shift-=Math.abs(gs.h); }
+    const _col=pageColumns(p).find(c=>sec.col_x>=c.min&&sec.col_x<c.max);
+    const _floor=_col? colGeo(p,_col).floor : null;
     const LH=Math.abs(AC.desc_leading*AC.desc_size);   // desc line height (~8.4pt Aiko)
     let cy=sec.last_y+shift;
     let prevName=sec.last_name_lines||1, prevDesc=sec.last_desc_lines||1;
     for(const it of bySec[si]){
       const dist = sec.slot + (prevDesc-2)*LH + (prevName-1)*AC.desc_size*1.93;   // gap depends on the PREVIOUS item's height
-      cy -= dist; out += buildItemJS(it,sec,cy);
+      cy -= dist;
+      const _dl=wrapDesc((it.desc||'').toUpperCase(),descWidthFor(sec),2).lines.filter(Boolean).length;
+      const _bottom=cy-LH*_dl-2;   // this item's own lowest ink, not just its name baseline
+      // backstop: never run an appended dish off the bottom of its column onto the page legend.
+      // growPlan charges added items against the budget first, so this should be unreachable —
+      // which is exactly why it must be loud rather than a silent truncation.
+      // Report, but still place it: silently dropping a dish the user deliberately added is
+      // worse than printing it tight, and ADD behaviour must not change just because growth exists.
+      if(_floor!=null && _bottom<_floor+DESC_CLEAR){ try{console.warn('appendedForPage: no room for "'+(it.name||'')+'" below '+(sec.label||sec.col_x)+' — skipped');}catch(_){ } }
+      out += buildItemJS(it,sec,cy);
       prevName = 1; prevDesc = wrapDesc((it.desc||'').toUpperCase(),descWidthFor(sec),2).lines.filter(Boolean).length;
     }
   }
@@ -1013,7 +1333,7 @@ function _dividerLines(bytes){
   while((m=re.exec(s))){ out.push({x:+m[1], y:+m[2], w:+m[3], xs:m[1], ws:m[3], full:[m.index, m.index+m[0].length]}); }
   return out;
 }
-function dividerOps(divs, removedSlots){
+function dividerOps(divs, removedSlots, growSlots){
   // Each divider sits just ABOVE the item it precedes (~0.4*pitch above the name top);
   // the first item of a section has no divider above it (section header sits there).
   // Removing an item must consume exactly ONE divider:
@@ -1025,7 +1345,8 @@ function dividerOps(divs, removedSlots){
   // grossly over-estimated), so the delete-window is derived from the column's own
   // divider PITCH, not from rs.h. rs.h is only used for the ride-up shift, where the
   // last-item over-estimate is harmless (nothing sits below the last item).
-  const ops=[]; if(!(removedSlots&&removedSlots.length)) return ops;
+  const ops=[]; if(!((removedSlots&&removedSlots.length)||(growSlots&&growSlots.length))) return ops;
+  removedSlots=removedSlots||[];
   const killed=new Set();
   const slots=[...removedSlots].sort((a,b)=>b.y-a.y);
   for(const rs of slots){
@@ -1048,7 +1369,15 @@ function dividerOps(divs, removedSlots){
       if(!(d.x>=rs.cmin && d.x<rs.cmax)) continue;
       if(d.y <= rs.y-Math.abs(rs.h)/2) shift += Math.abs(rs.h);
     }
-    if(shift>0) ops.push({s:d.full[0], e:d.full[1], rep:enc('q 1 0 0 1 '+d.xs+' '+fmtNum(d.y+shift)+' cm 0 0 m '+d.ws+' 0 l S Q')});
+    /* A rule below a grown description rides DOWN with the dishes it separates. Kept as its own
+       list rather than merged into removedSlots as a signed height: the kill logic above takes
+       Math.abs(rs.h), so a negative entry there would silently break the divider-kill window that
+       the per-dish removal sweeps pin. */
+    for(const gs of (growSlots||[])){
+      if(!(d.x>=gs.cmin && d.x<gs.cmax)) continue;
+      if(d.y < gs.y) shift -= Math.abs(gs.h);
+    }
+    if(Math.abs(shift)>5e-4) ops.push({s:d.full[0], e:d.full[1], rep:enc('q 1 0 0 1 '+d.xs+' '+fmtNum(d.y+shift)+' cm 0 0 m '+d.ws+' 0 l S Q')});
   });
   return ops;
 }
@@ -1065,7 +1394,7 @@ async function regenerate(){
     const divs = _dividerLines(ps.pristine);
     const inDiv = (s,e)=> divs.some(d=> d.full[0]<=s && e<=d.full[1]);
     const shiftOps = st.shiftOps.filter(o=> !inDiv(o.s,o.e));   // divider cms handled by own-Y, not block-shift
-    let ops = opsForPage(FM.fields.filter(f=>f.page===p), st.priceShift, skip).concat(shiftOps);
+    let ops = opsForPage(FM.fields.filter(f=>f.page===p), st.priceShift, skip, st.fieldShift).concat(shiftOps);
     // carve divider spans out of block-deletes so bundled dividers are never collaterally deleted
     let dels=[];
     for(const d of st.deletes){
@@ -1079,7 +1408,7 @@ async function regenerate(){
     if(dels.length){
       ops = ops.filter(o=> !dels.some(d=> d[0]<=o.s && o.e<=d[1] && !(o.s===d[0]&&o.e===d[1])) );
     }
-    for(const o of dividerOps(divs, st.removedSlots)) ops.push(o);   // reposition/delete each divider by its own Y
+    for(const o of dividerOps(divs, st.removedSlots, st.growSlots)) ops.push(o);   // reposition/delete each divider by its own Y
     // ---- allergen markers: re-stamp any item whose DESIRED set differs from what's baked in
     // the PDF. Covers both menu-truth corrections (allergens≠baked) and live user toggles. ----
     let markerAddStr='';
@@ -1088,10 +1417,29 @@ async function regenerate(){
       if(f.page!==p || f.role!=='name' || removed.has(f.id) || skip.has(f.id)) continue;
       const desired=(f.id in allerEdits)? allerEdits[f.id] : (f.allergens||[]);
       const baked=f.baked||[];
-      if([...desired].sort().join(',')===[...baked].sort().join(',')) continue;   // pristine already correct
+      const sameSet=[...desired].sort().join(',')===[...baked].sort().join(',');
+      /* The cluster is anchored to the name's RIGHT EDGE, so renaming a dish has to carry it along.
+         TOM YUM SOUP's icons are baked at x=113.45 — immediately after a 12-character name — so a
+         26-character name printed straight through them. Measure the delta on the LAST rendered
+         line, the one the markers follow, exactly as the grams tag does. */
+      const _lastLine=s=>{ const L=wrapName(String(s||''),nameBudgetChars(f),f.lines.length).lines.filter(Boolean);
+                           return L.length? L[L.length-1] : ''; };
+      const _ndx=(f.id in edits)? (_lastLine(edits[f.id]).length-_lastLine(f.display).length)*ADV.name*f.size : 0;
+      if(sameSet && Math.abs(_ndx)<0.005) continue;                    // pristine already correct
+      if(sameSet){
+        /* MOVE ONLY — slide the designer's own icon artwork rather than re-drawing it. Each baked
+           stamp is a `q 1 0 0 1 x y cm ... Q` group with an absolute origin, so translating the
+           origins moves the cluster rigidly and the export stays byte-faithful to the artwork.
+           (structuralForPage routed this field's vertical reflow into fieldShift for us, because
+           these spans CONTAIN the cm operands it would otherwise have patched — see TM OWNERSHIP.) */
+        const _mdy=st.fieldShift[f.id]||0;
+        for(const sp of (f.marker_stamps||[]))
+          ops.push({s:sp[0],e:sp[1],rep:enc(shiftArtOrigins(pageText(p).slice(sp[0],sp[1]), _ndx, _mdy))});
+        continue;
+      }
       for(const sp of (f.marker_stamps||[])) allerDelSpans.push(sp);   // remove this item's baked stamps
-      const d=itemShift(f, st.removedSlots);
-      const bx=(f.marker_bx!=null)?f.marker_bx:(f.x+(f.display||'').length*ADV.name*f.size+(AC.marker_gap||7));
+      const d=itemShift(f, st.removedSlots, st.growSlots);
+      const bx=((f.marker_bx!=null)?f.marker_bx:(f.x+(f.display||'').length*ADV.name*f.size+(AC.marker_gap||7)))+_ndx;
       markerAddStr += markerGroup(desired, bx, f.y + d, p);
     }
     for(const sp of allerDelSpans) ops.push({s:sp[0],e:sp[1],rep:enc(keepFont(sp,p))});
@@ -1101,7 +1449,7 @@ async function regenerate(){
     const pc=personaCover(p);
     for(const sp of pc.del){ ops.push({s:sp[0],e:sp[1],rep:enc(keepFont(sp,p))}); }
     let edited = ops.length ? spliceBytes(ps.pristine, ops) : ps.pristine;
-    const addStr = appendedForPage(p, st.removedSlots) + markerAddStr + pc.add;
+    const addStr = appendedForPage(p, st.removedSlots, st.growSlots) + markerAddStr + pc.add;
     if(addStr){ const ab=enc(addStr); const m=new Uint8Array(edited.length+ab.length); m.set(edited,0); m.set(ab,edited.length); edited=m; }
     ps.dict.set(PDFName.of('Length'), PDFNumber.of(edited.length));
     doc.context.assign(ps.ref, PDFRawStream.of(ps.dict, edited));
@@ -1272,6 +1620,32 @@ function labelVectorSpan(f){
   if(first<0||lastQ<0||lastQ<first) return f._vec=null;
   return f._vec=[start+first, start+lastQ+1];
 }
+/* Byte span of the `x y` operands of the Tm inside a header's run. Lets a header be MOVED without
+   being retyped: the edit path rewrites the whole run as one Tm+Tj, which re-lays-out the word with
+   a uniform advance and throws away the designer's per-glyph kerning — fine when the word changed,
+   wrong when it only slid sideways, because the stroked overlay still follows the ORIGINAL kerning
+   and the two would misregister. */
+function headerTmSpan(f){
+  if(f._htm!==undefined) return f._htm;
+  if(!f.run_span) return f._htm=null;
+  const seg=pageText(f.page).slice(f.run_span[0], f.run_span[1]);
+  const m=/(-?[\d.]+) (-?[\d.]+) Tm/.exec(seg);
+  if(!m) return f._htm=null;
+  const s=f.run_span[0]+m.index;
+  return f._htm={s:s, e:s+m[0].length-3};      // "x y", without the trailing " Tm"
+}
+/* Translate baked artwork rigidly by rewriting the absolute origin of everything inside a span.
+   Used for two things the designer drew and we must NOT redraw: a decorative label's stroked
+   letterforms (sibling `q 1 0 0 1 x y cm ... Q` groups, 8 of them for "Starters", never nested) and
+   a dish's allergen icon stamps. Both forms appear, so both are handled — path groups via their cm
+   origin, glyph markers (the Jain "J") via their text matrix. */
+function shiftArtOrigins(txt, dx, dy){
+  return txt
+    .replace(/q 1 0 0 1 (-?[\d.]+) (-?[\d.]+) cm/g,
+      (m,x,y)=>'q 1 0 0 1 '+fmtNum(parseFloat(x)+dx)+' '+fmtNum(parseFloat(y)+dy)+' cm')
+    .replace(/(-?[\d.]+) (-?[\d.]+) (-?[\d.]+) (-?[\d.]+) (-?[\d.]+) (-?[\d.]+) Tm/g,
+      (m,a,b,c,d,x,y)=>[a,b,c,d,fmtNum(parseFloat(x)+dx),fmtNum(parseFloat(y)+dy)].join(' ')+' Tm');
+}
 /* How many characters of `val` this header font cannot print. The category fonts are SUBSETS
    holding only the glyphs the artwork already uses — /TT1 (names) has no lowercase b/f/g/p/… and
    only D M N R S in caps; /TT2 (labels) has no space at all — so most realistic renames are simply
@@ -1383,7 +1757,12 @@ function renderAddZone(ed){
     const two=sec.price_right_2!=null; p2wrap.style.display=two?'':'none'; plabel.textContent=two?'Regular \u20b9':'Price \u20b9';
     const p2b=two?bad(price2El.value.trim(),ALLOWED.price):[];
     if(full){ nmeta.textContent='this section is full \u2014 remove one or pick another'; nmeta.className='afmeta bad'; }
-    addBtn.disabled = !nm||!de||nb.length||db.length||gb.length||p2b.length||ov||nov||full||spN.bad.length||spD.bad.length;
+    /* Spelling is ADVISORY, not a blocker. The suggestion line above still shows it, but a menu is
+       full of words no dictionary has — NDUJA, GHASLET, BURRATA, TTEOKBOKKI — so refusing to save on
+       a dictionary miss stops legitimate dishes from being added. What still blocks is only what
+       genuinely cannot be printed or placed: an empty field, a character with no glyph in the font,
+       text too long for its space, or a section with no room left. */
+    addBtn.disabled = !nm||!de||nb.length||db.length||gb.length||p2b.length||ov||nov||full;
   }
   nameEl.oninput=descEl.oninput=gramsEl.oninput=priceEl.oninput=price2El.oninput=secEl.onchange=validate; validate();
   form.querySelector('.afcancel').onclick=()=>{ form.classList.remove('open'); };
@@ -1529,7 +1908,7 @@ function buildEditor(){
       desc.textContent = descText(it.desc);
       card.appendChild(desc);
       const meta=document.createElement('div'); meta.className='metarow';
-      const _dcap=maxLinesAt(it.desc, it.desc.size);
+      const _dcap=maxLinesAt(it.desc, it.desc.size, growPlan(it.desc.page).extra[it.desc.id]||0);
       const lbl=document.createElement('span'); lbl.className='lbl'; lbl.textContent='Description · up to '+_dcap+' line'+(_dcap>1?'s':'');
       const ctr=document.createElement('span'); ctr.className='ctr'; ctr.dataset.for=it.desc.id;
       meta.appendChild(lbl); meta.appendChild(ctr); card.appendChild(meta);
@@ -1584,14 +1963,21 @@ function buildEditor(){
   renderAddZone(ed);
   if(typeof syncRail==='function') syncRail();
 }
+/* The room is a COLUMN budget, shared: growing one description changes what every OTHER
+   description in that column can still have. A single edit therefore has to refresh every counter
+   on the page, or a neighbour keeps advertising capacity that has already been spent. */
+function refreshCtrs(){ document.querySelectorAll('#editor .desc').forEach(el=>{ try{ updateCtr(el); }catch(_){ } }); }
 function updateCtr(el){
   const f=FIELD[el.dataset.id]; if(!f) return;
   const ctr=document.querySelector(".ctr[data-for='"+el.dataset.id+"']"); if(!ctr) return;
   const val=el.textContent.replace(/\u00a0/g,' ').trim();
-  const fit=fitDesc(f, val); const w={lines:fit.lines, overflow:fit.overflow};
-  const _used=fit.lines.filter(Boolean).length, _cap=maxLinesAt(f, fit.size), _fitted=fit.size<f.size-0.005;
-  ctr.textContent = w.overflow ? 'too long — even at the smallest size'
-                  : (_used+'/'+_cap+' lines'+(_fitted?' · auto-fitted':''));
+  // read the column's own plan, so the count shown is the count that will be printed
+  const G=growPlan(f.page), ex=G.extra[f.id]||0;
+  const fit=((f.id in edits)&&G.fit[f.id])||fitDesc(f, val, ex); const w={lines:fit.lines, overflow:fit.overflow};
+  const _used=fit.lines.filter(Boolean).length, _cap=maxLinesAt(f, fit.size, ex), _fitted=fit.size<f.size-0.005;
+  const _pushed=ex>0;
+  ctr.textContent = w.overflow ? 'no room left in this column — shorten this, or a description above it'
+                  : (_used+'/'+_cap+' lines'+(_fitted?' · auto-fitted':'')+(_pushed?' · pushes the dishes below down':''));
   ctr.classList.toggle('over', w.overflow);
 }
 
@@ -1608,7 +1994,7 @@ document.getElementById('editor').addEventListener('input', e=>{
     const t=el.classList.contains('name')? normTypo(el.textContent).toUpperCase().trim()
                                          : normTypo(el.textContent).trim();
     if(t===el.dataset.orig) delete edits[el.dataset.id]; else edits[el.dataset.id]=t;
-    if(el.classList.contains('desc')) updateCtr(el);
+    if(el.classList.contains('desc')) refreshCtrs();
     clearTimeout(etimer); etimer=setTimeout(()=>{ highlightField(el); updateGate(); }, 160);
     schedulePreview();
   } else if(el.classList.contains('price')){
@@ -1656,7 +2042,10 @@ function updateGate(){
   document.querySelectorAll('.card').forEach(c=>{
     const g=c.querySelector('.gl'),s=c.querySelector('.sp'),h=c.querySelector('.hint'); if(!h) return;
     let over=false;
-    c.querySelectorAll('.name,.desc').forEach(el=>{ const f=FIELD[el.dataset.id]; if(f&&(el.dataset.id in edits)&&isOverflow(f,edits[el.dataset.id])) over=true; });
+    // a description is only "too long" once the COLUMN has run out of room to push for it, which is
+    // growPlan's verdict — asking isOverflow() directly would still measure the pristine gap
+    c.querySelectorAll('.name,.desc').forEach(el=>{ const f=FIELD[el.dataset.id]; if(!f||!(el.dataset.id in edits)) return;
+      if(f.role==='desc' ? !!growPlan(f.page).over[f.id] : isOverflow(f,edits[el.dataset.id])) over=true; });
     if(over) ov++;
     if(over){c.classList.add('haswarn');h.textContent='Text is too long for the space — shorten it so it fits the line limit.';}
     else if(g){c.classList.add('haswarn');h.textContent='Some characters aren’t in the menu font and can’t be printed.';}
