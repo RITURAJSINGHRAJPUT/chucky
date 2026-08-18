@@ -1494,15 +1494,33 @@ async function regenerate(){
       const sp=nf.markerSpans||{};
       const dx=_mkDx(nf);
       for(const t in sp) mkDelSpans.push(sp[t]);
-      let shift=0;   // if items were removed above, ride the anchor up with the dish
-      for(const rs of (st.removedSlots||[])){ if(nf.x>=rs.cmin && nf.x<rs.cmax && nf.markerBase[1] <= rs.y-Math.abs(rs.h)/2) shift+=Math.abs(rs.h); }
-      shift += (st.fieldShift[nf.id]||0);        // and ride growth/reflow the same way
+      /* Ride the dish's OWN reflow. The hand-rolled loop this replaces tested markerBase[1] against
+         each removed slot and came out ZERO for CASSATA, so its markers stayed at the baked y while
+         the dish itself moved up ~56pt, stranding the icons on whatever now occupied that row.
+         Measure the shift at the dish's own position instead, netting removals against growth. */
+      let shift = 0;
+      for(const rs of (st.removedSlots||[])) if(nf.x>=rs.cmin && nf.x<rs.cmax && rs.y>nf.y) shift += Math.abs(rs.h);
+      for(const gs of (st.growSlots||[]))    if(nf.x>=gs.cmin && nf.x<gs.cmax && gs.y>nf.y) shift -= Math.abs(gs.h);
+      /* Deliberately NOT adding st.fieldShift here. That map accumulates a delta once per ANCHOR
+         inside a field's owned spans, and a dish owns one span per marker (four for CASSATA, each
+         holding several cm anchors) - so it summed the same shift repeatedly and read 227.24pt when
+         the dish had actually moved 56.81pt. The loop above measures the dish's own travel directly,
+         which is the number the markers need. */
       /* markerBase records the name's FIRST line, but a wrapped name bakes its icons beside the
          LAST one — PISTACHIO MOUSSE CAKE's sit ~15.6pt below its own baseline. Harmless while only
          edited dishes were re-stamped; now that every dish is, all five 2-line dishes would jump. */
       const nlines = (nf.lines && nf.lines.length) || 1;
       const anchorY = nf.markerBase[1] - (nlines-1)*(nf.size*1.2) + shift;
-      mkAppend += stampMarkers(nf.markerBase[0]+dx, anchorY, dishMarkers(nf.id), p);
+      /* FLOOR the row at the name's real right edge. `markerBase + dx` assumes the length delta is
+         always right; when it is not (or is zero) the cluster lands INSIDE the name — which is how
+         a renamed CASSATA printed "CASSATA 2.0NEW", the badge sitting on the last glyph. Measuring
+         where the name actually ends makes the overlap structurally impossible rather than relying
+         on the delta being correct. AO Mono is monospaced at 0.63 em, the same advance the wrap and
+         the budget already use. */
+      const _nmVal=(nf.id in edits)?edits[nf.id]:nf.display;
+      const _nameEnd=nf.x + _mkLast(nf,_nmVal).length*ADV.name*nf.size;
+      const _bx=Math.max(nf.markerBase[0]+dx, _nameEnd+6);
+      mkAppend += stampMarkers(_bx, anchorY, dishMarkers(nf.id), p);
     }
     const inMarker=(s,e)=> mkDelSpans.some(sp=> sp[0]<=s && e<=sp[1]);
     const inBadge = (s,e)=> bdg.spans.some(sp=> sp[0]<=s && e<=sp[1]);
@@ -1546,7 +1564,17 @@ async function regenerate(){
       ops = ops.filter(o=> !dels.some(d=> d[0]<=o.s && o.e<=d[1] && !(o.s===d[0]&&o.e===d[1])) );
     }
     for(const o of dividerOps(divs, st.removedSlots, st.growSlots)) ops.push(safeOp(p,o));   // reposition/delete each divider by its own Y
-    for(const o of bdg.ops) ops.push(safeOp(p,o));   // delete removed items' NEW badges + ride survivors up by their own Y
+    /* A badge whose dish is being RE-STAMPED belongs to the marker pass, not here. Both wrote the
+       SAME span - badgeOps riding it to a new y, mkDelSpans deleting it - and spliceBytes can only
+       honour one, so the badge survived at its OLD x while the delete (and the re-stamp of the
+       other three markers) was dropped. That is why removing a dish made CASSATA's NEW badge land
+       on its renamed text and the bottle/wheat/J vanish. */
+    for(const o of bdg.ops){
+      // ANY overlap, either direction: the badge op's span is the whole badge block and CONTAINS
+      // the fieldmap's narrower marker span, so a containment test in one direction misses it
+      if(mkDelSpans.some(sp=> o.s < sp[1] && sp[0] < o.e)) continue;   // marker pass owns this badge
+      ops.push(safeOp(p,o));   // delete removed items' NEW badges + ride survivors up by their own Y
+    }
     for(const sp of mkDelSpans) ops.push({s:sp[0],e:sp[1],rep:enc(safeDel(p,sp[0],sp[1],keepFont(sp,p)))});   // strip edited dishes' baked markers (restamped below)
     const pc=personaCover(p);   // personalised cover: hide any `del` spans, stamp occasion + guest
     for(const sp of pc.del){ ops.push({s:sp[0],e:sp[1],rep:enc(safeDel(p,sp[0],sp[1],keepFont(sp,p)))}); }
