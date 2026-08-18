@@ -116,6 +116,10 @@ main.app{display:grid;grid-template-columns:210px 1fr minmax(400px,560px);height
 .price.err{border-color:var(--bad);background:#fff6f6;color:#1a1400}
 .rm{flex:none;width:30px;height:30px;border-radius:7px;color:var(--muted);display:grid;place-items:center;font-size:15px;transition:.13s}
 .rm:hover{color:var(--bad);background:rgba(229,103,94,.1)}
+/* An added dish's description PRINTS uppercase (buildItemJS uppercases it), so show it uppercase
+   while typing — otherwise the field disagrees with the menu. Done in CSS, never by rewriting the
+   text, because rewriting a contentEditable collapses the caret and types backwards. */
+.addedcard .desc{text-transform:uppercase}
 .desc{font-size:12.5px;color:var(--cream-dim);margin-top:8px;outline:none;border-radius:5px;padding:4px 6px;margin-left:-6px;margin-right:-6px;line-height:1.5;max-width:58ch}
 .desc:focus{background:rgba(233,184,51,.07);box-shadow:inset 0 0 0 1px var(--aiko-line)}
 .metarow{display:flex;align-items:center;gap:10px;margin-top:10px;flex-wrap:wrap}
@@ -1290,7 +1294,17 @@ function buildItemJS(it, sec, Y){
   if(al.has('jain')){   p.push('BT\n'+IC+'\n'+F.j+' 1 Tf\n0 Tc 0 Tw '+C.j_size+' 0 0 '+C.j_size+' '+jFmt(ix)+' '+jFmt(Y+C.icon_j[1])+' Tm\n(J)Tj\nET'); ix+=JW; }
   if(al.has('korea'))   p.push('q 1 0 0 1 '+jFmt(bx+C.icon_korea[0])+' '+jFmt(Y+C.icon_korea[1])+' cm\n'+flagBody('korea')+'Q');
   if(al.has('new'))     p.push(jStamp(ICONS.newbadge, ix+BG, Y+C.icon_badge[1]).trim());
-  p.push('0.727 0.668 0.652 0.813 K\n0.464 w\nq 1 0 0 1 '+jFmt(NX)+' '+jFmt(Y+19.5)+' cm\n0 0 m\n'+jFmt(sec.divider_w)+' 0 l\nS\nQ');
+  /* An appended dish draws the rule that separates it from the dish above — but only if the artwork
+     does not already have one there. In the RIGHT section of page 0 the appended item lands 1.2pt
+     from a baked divider, and drawing anyway put TWO rules on top of each other, reading as one
+     thick line above the new dish. Tolerance is 3pt: rules in this menu are ~0.46pt thick and real
+     neighbouring dividers are tens of points apart, so nothing legitimate is suppressed. */
+  const _ry=Y+19.5;
+  const _dupRule=(dividersFor(sec.page)||[]).some(d=>{
+    const dx=(d.x!=null)?d.x:parseFloat(d.xs), dw=(d.w!=null)?d.w:parseFloat(d.ws);
+    return Math.abs(d.y-_ry)<3 && NX>=dx-8 && NX<=dx+dw+8;
+  });
+  if(!_dupRule) p.push('0.727 0.668 0.652 0.813 K\n0.464 w\nq 1 0 0 1 '+jFmt(NX)+' '+jFmt(_ry)+' cm\n0 0 m\n'+jFmt(sec.divider_w)+' 0 l\nS\nQ');
   const sz=PAGES[sec.page]||[841.89,595.276], W=sz[0], H=sz[1];
   return '\nq\n0 '+jFmt(H)+' '+jFmt(W)+' '+jFmt(-H)+' re\nW n\n'+p.join('\n')+'\nQ\n';
 }
@@ -1480,15 +1494,33 @@ async function regenerate(){
       const sp=nf.markerSpans||{};
       const dx=_mkDx(nf);
       for(const t in sp) mkDelSpans.push(sp[t]);
-      let shift=0;   // if items were removed above, ride the anchor up with the dish
-      for(const rs of (st.removedSlots||[])){ if(nf.x>=rs.cmin && nf.x<rs.cmax && nf.markerBase[1] <= rs.y-Math.abs(rs.h)/2) shift+=Math.abs(rs.h); }
-      shift += (st.fieldShift[nf.id]||0);        // and ride growth/reflow the same way
+      /* Ride the dish's OWN reflow. The hand-rolled loop this replaces tested markerBase[1] against
+         each removed slot and came out ZERO for CASSATA, so its markers stayed at the baked y while
+         the dish itself moved up ~56pt, stranding the icons on whatever now occupied that row.
+         Measure the shift at the dish's own position instead, netting removals against growth. */
+      let shift = 0;
+      for(const rs of (st.removedSlots||[])) if(nf.x>=rs.cmin && nf.x<rs.cmax && rs.y>nf.y) shift += Math.abs(rs.h);
+      for(const gs of (st.growSlots||[]))    if(nf.x>=gs.cmin && nf.x<gs.cmax && gs.y>nf.y) shift -= Math.abs(gs.h);
+      /* Deliberately NOT adding st.fieldShift here. That map accumulates a delta once per ANCHOR
+         inside a field's owned spans, and a dish owns one span per marker (four for CASSATA, each
+         holding several cm anchors) - so it summed the same shift repeatedly and read 227.24pt when
+         the dish had actually moved 56.81pt. The loop above measures the dish's own travel directly,
+         which is the number the markers need. */
       /* markerBase records the name's FIRST line, but a wrapped name bakes its icons beside the
          LAST one — PISTACHIO MOUSSE CAKE's sit ~15.6pt below its own baseline. Harmless while only
          edited dishes were re-stamped; now that every dish is, all five 2-line dishes would jump. */
       const nlines = (nf.lines && nf.lines.length) || 1;
       const anchorY = nf.markerBase[1] - (nlines-1)*(nf.size*1.2) + shift;
-      mkAppend += stampMarkers(nf.markerBase[0]+dx, anchorY, dishMarkers(nf.id), p);
+      /* FLOOR the row at the name's real right edge. `markerBase + dx` assumes the length delta is
+         always right; when it is not (or is zero) the cluster lands INSIDE the name — which is how
+         a renamed CASSATA printed "CASSATA 2.0NEW", the badge sitting on the last glyph. Measuring
+         where the name actually ends makes the overlap structurally impossible rather than relying
+         on the delta being correct. AO Mono is monospaced at 0.63 em, the same advance the wrap and
+         the budget already use. */
+      const _nmVal=(nf.id in edits)?edits[nf.id]:nf.display;
+      const _nameEnd=nf.x + _mkLast(nf,_nmVal).length*ADV.name*nf.size;
+      const _bx=Math.max(nf.markerBase[0]+dx, _nameEnd+6);
+      mkAppend += stampMarkers(_bx, anchorY, dishMarkers(nf.id), p);
     }
     const inMarker=(s,e)=> mkDelSpans.some(sp=> sp[0]<=s && e<=sp[1]);
     const inBadge = (s,e)=> bdg.spans.some(sp=> sp[0]<=s && e<=sp[1]);
@@ -1532,7 +1564,17 @@ async function regenerate(){
       ops = ops.filter(o=> !dels.some(d=> d[0]<=o.s && o.e<=d[1] && !(o.s===d[0]&&o.e===d[1])) );
     }
     for(const o of dividerOps(divs, st.removedSlots, st.growSlots)) ops.push(safeOp(p,o));   // reposition/delete each divider by its own Y
-    for(const o of bdg.ops) ops.push(safeOp(p,o));   // delete removed items' NEW badges + ride survivors up by their own Y
+    /* A badge whose dish is being RE-STAMPED belongs to the marker pass, not here. Both wrote the
+       SAME span - badgeOps riding it to a new y, mkDelSpans deleting it - and spliceBytes can only
+       honour one, so the badge survived at its OLD x while the delete (and the re-stamp of the
+       other three markers) was dropped. That is why removing a dish made CASSATA's NEW badge land
+       on its renamed text and the bottle/wheat/J vanish. */
+    for(const o of bdg.ops){
+      // ANY overlap, either direction: the badge op's span is the whole badge block and CONTAINS
+      // the fieldmap's narrower marker span, so a containment test in one direction misses it
+      if(mkDelSpans.some(sp=> o.s < sp[1] && sp[0] < o.e)) continue;   // marker pass owns this badge
+      ops.push(safeOp(p,o));   // delete removed items' NEW badges + ride survivors up by their own Y
+    }
     for(const sp of mkDelSpans) ops.push({s:sp[0],e:sp[1],rep:enc(safeDel(p,sp[0],sp[1],keepFont(sp,p)))});   // strip edited dishes' baked markers (restamped below)
     const pc=personaCover(p);   // personalised cover: hide any `del` spans, stamp occasion + guest
     for(const sp of pc.del){ ops.push({s:sp[0],e:sp[1],rep:enc(safeDel(p,sp[0],sp[1],keepFont(sp,p)))}); }
@@ -1683,15 +1725,97 @@ function colWord(x){ return x<200?'left':x<450?'middle':'right'; }
 function renderAddZone(ed){
   const secs=sectionsForPage(activePage);
   if(!secs.length) return;
+  /* Drop anything the target font cannot print, rather than letting it reach the PDF as a blank.
+     ALLOWED.name was widened at boot to include digits and .,:-/ because the emitter borrows those
+     glyphs from other embedded faces (see nameRunPdf), so this stays in step automatically. */
+  /* Strip unprintable characters but PRESERVE THE TYPED CASE. Uppercasing here is what made typing
+     run backwards: the menu prints uppercase, so the old version uppercased on every keystroke, which
+     meant the field's text always differed from what the user had just typed, which forced a DOM
+     rewrite on every character, which collapsed the caret to position 0. The data is uppercased at
+     the point it is STORED instead, and the field is uppercased visually by CSS. */
+  /* A contentEditable inserts a NON-BREAKING space (U+00A0), not a plain one — deliberately, because
+     a plain TRAILING space collapses in HTML and would not render. So:
+       - the field KEEPS its nbsp (allowed here), which is why nothing is rewritten and the space you
+         type actually appears and holds the caret;
+       - normTypo folds it to U+0020 only at the point the value is STORED, so the PDF gets a real
+         space and never an nbsp.
+     Stripping it in the field (the previous attempt) removed the character outright; converting it to
+     a plain space (the attempt before that) made a trailing space collapse and vanish. */
+  const cleanFor=(s,kind)=>{ const al=(ALLOWED[kind]||ALLOWED.name)+'\u00A0'   /* explicit: NBSP, what a contentEditable inserts for a space */;
+    return [...String(s||'')].filter(c=>al.indexOf(c.toUpperCase())>=0).join(''); };
+  const storeVal=(s)=>normTypo(String(s||'')).toUpperCase();
+  /* Writing textContent on a contentEditable COLLAPSES THE CARET TO THE START, so rewriting on every
+     keystroke made typing come out reversed. Put the caret back where it was, minus however many
+     characters the clean-up removed — the same correction churnd's name input makes with
+     setSelectionRange(p-1). Only touch the DOM when the text actually changed, so normal typing
+     never moves the caret at all. */
+  const setEditable=(el,v)=>{
+    const prev=el.textContent;
+    if(prev===v) return;
+    const sel=document.getSelection();
+    let off=null;
+    if(sel&&sel.rangeCount&&el.contains(sel.anchorNode)) off=sel.anchorOffset;
+    el.textContent=v;
+    if(off==null) return;
+    const want=Math.max(0, Math.min(off-(prev.length-v.length), v.length));
+    try{ const node=el.firstChild||el; const r=document.createRange();
+         r.setStart(node, node.nodeType===3?want:0); r.collapse(true);
+         sel.removeAllRanges(); sel.addRange(r); }catch(_){ }
+  };
   added.forEach((a,idx)=>{
     if(SECTIONS[a.sec].page!==activePage) return;
-    const c=document.createElement('div'); c.className='addcard';
-    const n=document.createElement('span'); n.className='ac-n'; n.textContent=a.name||'(unnamed)';
-    const t=document.createElement('span'); t.className='ac-tag'; t.textContent='NEW IN '+SECTIONS[a.sec].label;
-    const pr=document.createElement('span'); pr.className='ac-price'; pr.textContent=(a.price?('\u20b9'+a.price):'')+(a.price2?('  \u20b9'+a.price2):'');
-    const x=document.createElement('button'); x.className='ac-x'; x.textContent='\u2715'; x.title='Remove this new item';
-    x.onclick=()=>{ const k=added.indexOf(a); if(k>=0)added.splice(k,1); buildEditor(); schedulePreview(); };
-    c.append(n,t,pr,x); ed.appendChild(c);
+    /* An added dish gets the SAME `.card` a baked dish gets, not a read-only strip. It used to render
+       as four spans with no separator ("HOT CHIPSNEW IN LEFT") and no way to change anything after
+       adding \u2014 so a typo meant deleting the dish and re-entering it. Bound to `added[idx]` instead of
+       `edits{}`, but reusing the baked markup so it inherits the styling, and reusing cleanField\u00e2\u2020\u2019
+       ALLOWED / wrapDesc / MARKER_TYPES so the same rules apply as everywhere else. */
+    const sec=SECTIONS[a.sec];
+    const card=document.createElement('div'); card.className='card addedcard';
+    const nrow=document.createElement('div'); nrow.className='nrow';
+    const name=document.createElement('div'); name.className='name'; name.contentEditable='true';
+    name.dataset.kind='name'; name.textContent=a.name||'';
+    name.oninput=()=>{ const v=cleanFor(name.textContent,'name'); setEditable(name,v);
+                       a.name=storeVal(v).trim(); schedulePreview(); };   // nbsp->space + uppercase, in the DATA only
+    nrow.appendChild(name);
+    const tag=document.createElement('span'); tag.className='ac-tag'; tag.textContent=' NEW IN '+sec.label+' ';
+    nrow.appendChild(tag);
+    const pwrap=document.createElement('div'); pwrap.className='prices';
+    [['price','Regular'],['price2','Large']].forEach(([k,ttl])=>{
+      const w=document.createElement('div'); w.className='pwrap';
+      const inp=document.createElement('input'); inp.className='price'; inp.title=ttl; inp.inputMode='numeric'; inp.value=a[k]||'';
+      inp.oninput=()=>{ const v=cleanFor(inp.value,'price'); if(inp.value!==v) inp.value=v; a[k]=v.trim(); schedulePreview(); };
+      w.appendChild(inp); pwrap.appendChild(w);
+    });
+    nrow.appendChild(pwrap);
+    const rm=document.createElement('button'); rm.className='rm'; rm.type='button'; rm.textContent='\u2715';
+    rm.title='Remove this new item';
+    rm.onclick=()=>{ const k=added.indexOf(a); if(k>=0)added.splice(k,1); buildEditor(); schedulePreview(); };
+    nrow.appendChild(rm); card.appendChild(nrow);
+    const desc=document.createElement('div'); desc.className='desc'; desc.contentEditable='true';
+    desc.dataset.kind='desc'; desc.textContent=a.desc||'';
+    const meta=document.createElement('div'); meta.className='metarow';
+    const lbl=document.createElement('span'); lbl.className='lbl';
+    const ctr=document.createElement('span'); ctr.className='ctr';
+    const cap=2;                                    // buildItemJS wraps an added desc to 2 lines
+    const syncDesc=()=>{ const w=wrapDesc((a.desc||'').toUpperCase(), 56, cap);
+      lbl.textContent='Description \u00b7 up to '+cap+' lines';
+      ctr.textContent=w.overflow ? 'too long \u2014 shorten it' : (w.lines.filter(Boolean).length+'/'+cap+' lines');
+      ctr.classList.toggle('over', !!w.overflow); };
+    desc.oninput=()=>{ const v=cleanFor(desc.textContent,'desc'); setEditable(desc,v);
+                       a.desc=storeVal(v); syncDesc(); schedulePreview(); };   // nbsp->space + uppercase, in the DATA only
+    card.appendChild(desc); meta.append(lbl,ctr); card.appendChild(meta); syncDesc();
+    const mrow=document.createElement('div'); mrow.className='markrow';
+    const ml=document.createElement('span'); ml.className='mlbl'; ml.textContent='Markers'; mrow.appendChild(ml);
+    const cur=new Set(a.allergens||[]);
+    for(const t of MARKER_TYPES){
+      const chip=document.createElement('button'); chip.type='button';
+      chip.className='mchip m-'+t+(cur.has(t)?' on':'');
+      chip.textContent=(MARKER_LABEL[t]||t)+(t==='new'?' badge':'');
+      chip.onclick=()=>{ if(cur.has(t)) cur.delete(t); else cur.add(t);
+        a.allergens=MARKER_TYPES.filter(x=>cur.has(x)); chip.classList.toggle('on'); schedulePreview(); };
+      mrow.appendChild(chip);
+    }
+    card.appendChild(mrow); ed.appendChild(card);
   });
   const zone=document.createElement('div'); zone.className='addzone';
   const btn=document.createElement('button'); btn.className='addbtn'; btn.textContent='+  Add a new item';
@@ -1861,6 +1985,12 @@ let etimer=null, ptimer=null;
 function schedulePreview(){ clearTimeout(ptimer); ptimer=setTimeout(async()=>{ await regenerate(); renderPreview(); }, 380); }
 document.getElementById('editor').addEventListener('input', e=>{
   const el=e.target;
+  /* BAKED fields only. An added item's card reuses these same classes to inherit the styling, but it
+     carries its own handlers and has no fieldmap id — so without this guard every keystroke there
+     also ran through here, which (a) wrote edits[undefined], polluting the baked-edit map, and
+     (b) called highlightField(), which rewrites the element's innerHTML to add spell underlines and
+     so collapsed the caret to position 0 — the reason typing in an added card came out reversed. */
+  if(!el.dataset.id) return;
   if(el.classList.contains('name')||el.classList.contains('desc')){
     const t=normTypo(el.textContent).toUpperCase().trim();
     if(t===el.dataset.orig) delete edits[el.dataset.id]; else edits[el.dataset.id]=t;
@@ -1887,8 +2017,24 @@ document.getElementById('editor').addEventListener('click', e=>{
 pop.addEventListener('click', e=>{
   const b=e.target.closest('button'); if(!b) return; const sp=pop._t, fieldEl=sp.closest('.name,.desc');
   if(b.dataset.fix!=null){
-    const parts=fieldEl.textContent.match(/(\s+|[^\s]+)/g)||[]; let done=false;
-    fieldEl.textContent=parts.map(t=>{ if(!done&&/[^\s]/.test(t)&&deacc(t).replace(/[^A-Za-z']/g,'')===sp.dataset.w){done=true;return b.dataset.fix;} return t; }).join('');
+    /* Read innerText, not textContent: textContent drops <br> and block boundaries WITHOUT emitting
+       a separator, so a word after a visual line break fused with the one before it
+       ("PARMESAN,CHIMICHURRI"), normalised to a token that could never match, and the fix silently
+       did nothing. innerText renders breaks as \n, which is then folded to a space — the field is
+       one continuous value that merely wraps, so a break carries no meaning.
+       Also replace the occurrence that was actually CLICKED rather than the first match, or a word
+       appearing twice would have the wrong one corrected. Matching is case-insensitive because the
+       highlighter stores the dictionary form while the field may hold any case. */
+    const src=(fieldEl.innerText!=null?fieldEl.innerText:fieldEl.textContent).replace(/[\r\n]+/g,' ');
+    const parts=src.match(/(\s+|[^\s]+)/g)||[];
+    const key=t=>deacc(t).replace(/[^A-Za-z']/g,'').toUpperCase();
+    const want=String(sp.dataset.w||'').toUpperCase();
+    const spans=[...fieldEl.querySelectorAll('.sp')].filter(x=>String(x.dataset.w||'').toUpperCase()===want);
+    let nth=Math.max(0, spans.indexOf(sp)), seen=-1;
+    fieldEl.textContent=parts.map(t=>{
+      if(!/[^\s]/.test(t)||key(t)!==want) return t;
+      seen++; return seen===nth ? b.dataset.fix : t;
+    }).join('');
     const t=normTypo(fieldEl.textContent).trim(); if(t===fieldEl.dataset.orig) delete edits[fieldEl.dataset.id]; else edits[fieldEl.dataset.id]=t;
     if(fieldEl.classList.contains('desc')) updateCtr(fieldEl);
     schedulePreview();
@@ -1922,9 +2068,13 @@ function updateGate(){
     else if(s){c.classList.add('haswarn');h.textContent='Possible spelling issue — click the underlined word to fix or ignore.';}
     else c.classList.remove('haswarn');
   });
-  const total=sp+gl+pe+ov, pill=document.getElementById('flagpill'), ex=document.getElementById('export');
+  /* Spelling is ADVISORY for EXPORT too, matching the Add button. A menu is full of words no
+     dictionary has, and refusing to export over one is what stopped a finished menu going out. The
+     pill still reports the count so it stays visible. What genuinely blocks is only what would
+     print WRONG: a character with no glyph in the font, a bad price, or text too long for its space. */
+  const blocking=gl+pe+ov, total=sp+blocking, pill=document.getElementById('flagpill'), ex=document.getElementById('export');
   if(total===0){ pill.className='pill ok'; pill.textContent='All clear'+(spBase?' \u00b7 '+spBase+' word'+(spBase>1?'s':'')+' to review':''); ex.disabled=false; }
-  else{ pill.className='pill bad'; const b=[]; if(sp)b.push(sp+' spelling'); if(gl)b.push(gl+' font'); if(pe)b.push(pe+' price'); if(ov)b.push(ov+' too long'); pill.textContent=b.join(' · ')+' to fix'; ex.disabled=true; }
+  else{ pill.className='pill bad'; const b=[]; if(sp)b.push(sp+' spelling'); if(gl)b.push(gl+' font'); if(pe)b.push(pe+' price'); if(ov)b.push(ov+' too long'); pill.textContent=b.join(' · ')+(blocking?' to fix':' to review'); ex.disabled=blocking>0; }
 }
 /* ---- FULL-PAGE PREVIEW HANDOFF --------------------------------------------------------------
    Opens /preview/ in a new tab showing the ACTUAL current PDF. There is NO second generator here:

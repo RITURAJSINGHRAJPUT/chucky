@@ -2052,9 +2052,13 @@ function updateGate(){
     else if(s){c.classList.add('haswarn');h.textContent='Possible spelling issue — click the underlined word to fix or ignore.';}
     else c.classList.remove('haswarn');
   });
-  const total=sp+gl+pe+ov, pill=document.getElementById('flagpill'), ex=document.getElementById('export');
+  /* Spelling is ADVISORY for EXPORT too, matching the Add button. A menu is full of words no
+     dictionary has, and refusing to export over one is what stopped a finished menu going out. The
+     pill still reports the count so it stays visible. What genuinely blocks is only what would
+     print WRONG: a character with no glyph in the font, a bad price, or text too long for its space. */
+  const blocking=gl+pe+ov, total=sp+blocking, pill=document.getElementById('flagpill'), ex=document.getElementById('export');
   if(total===0){ pill.className='pill ok'; pill.textContent='All clear'+(spBase?' \u00b7 '+spBase+' word'+(spBase>1?'s':'')+' to review':''); ex.disabled=false; }
-  else{ pill.className='pill bad'; const b=[]; if(sp)b.push(sp+' spelling'); if(gl)b.push(gl+' font'); if(pe)b.push(pe+' price'); if(ov)b.push(ov+' too long'); pill.textContent=b.join(' · ')+' to fix'; ex.disabled=true; }
+  else{ pill.className='pill bad'; const b=[]; if(sp)b.push(sp+' spelling'); if(gl)b.push(gl+' font'); if(pe)b.push(pe+' price'); if(ov)b.push(ov+' too long'); pill.textContent=b.join(' · ')+(blocking?' to fix':' to review'); ex.disabled=blocking>0; }
 }
 /* ---- FULL-PAGE PREVIEW HANDOFF --------------------------------------------------------------
    Opens /preview/ in a new tab showing the ACTUAL current PDF. There is NO second generator here:
