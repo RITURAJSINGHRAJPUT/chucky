@@ -420,7 +420,46 @@ section('11. LAYOUT CONSISTENCY — one source of truth');
 }
 
 // =============================================================================================
-section('12. COVERAGE');
+section('12. PAGE FURNITURE stays pinned through a reflow (L4)');
+{
+  /* The footer "Other prices" block (GHASLET HOT SAUCE / PARMESAN / BURRATA / TRUFFLE) is page
+     furniture: four unattached prices, their labels, and a leader rule per row. A reflow used to
+     move part of it and leave the rest — the shift guard sat at y 93.71, in the middle of a block
+     spanning 65.85-101.55, so the top row travelled and the three below it did not ("120" landed on
+     "120/400"). A plain REMOVAL displaced one row by 98.3pt. Both text and leader rules are checked:
+     they travel by different code paths and each tore independently. */
+  const A = await import('./lib/audit.mjs');
+  const src = path.join(DIR, 'capiche.pdf');
+  const baseOv = A.overlaps(src, 0, { menuMaxX: 820 });
+  const okey = o => [o.a, o.b].sort().join('  ');
+  const seenOv = new Set(baseOv.map(okey));
+  // every rendered row in the footer region, text and rules alike
+  const footer = pdf => inkRuns(pdf, 0, { x0: 540, x1: 830, yTop: 130, yBot: 8, dpi: 300 })
+    .map(r => `${r.x0.toFixed(1)}..${r.x1.toFixed(1)}@${r.bot.toFixed(1)}`).sort().join('|');
+  const baseFoot = footer(require('fs').readFileSync(src));
+  const page0 = names.filter(n => n.page === 0 && n.x > 500);
+  const rightDesc = descs.find(d => d.page === 0 && d.x > 500);
+  const scen = [
+    ['a grown name in that column', () => E.setEdit(page0[0].id, 'AAAA BBBB CCCC DDDD EEEE FFFF')],
+    ['a grown description', () => rightDesc && E.setEdit(rightDesc.id,
+      (rightDesc.display || '') + ', EXTRA HERB, ROASTED GARLIC, CHILLI CRISP, SPRING ONION, TOASTED SESAME')],
+    ['two removals', () => { E.removed.add(page0[1].id); E.removed.add(page0[2].id); }],
+    ['a removal plus a grown name', () => { E.setEdit(page0[0].id, 'AAAA BBBB CCCC DDDD EEEE FFFF'); E.removed.add(page0[2].id); }],
+  ];
+  let torn = [], newOv = [];
+  for (const [label, setup] of scen) {
+    E.reset(); setup();
+    const pdf = await exportBytes(E);
+    if (footer(pdf) !== baseFoot) torn.push(label);
+    const fresh = A.overlaps(pdf, 0, { menuMaxX: 820 }).filter(o => !seenOv.has(okey(o)));
+    if (fresh.length) newOv.push(`${label}: ${JSON.stringify(fresh[0].a).slice(0, 24)} <> ${JSON.stringify(fresh[0].b).slice(0, 24)}`);
+  }
+  rec('the footer price block never moves, text or rules', !torn.length, torn.join('; '));
+  rec('a reflow introduces no new overlap on page 0', !newOv.length, newOv.join('; '));
+}
+
+// =============================================================================================
+section('13. COVERAGE');
 {
   const byPage = {}, byCol = {};
   for (const f of names) {

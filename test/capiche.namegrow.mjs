@@ -57,7 +57,6 @@ const grew = [], refused = [];
     const G = E.bind.growPlan(f.page);
     if (G.nameExtra[f.id] > 0) grew.push(f.id);
     else if (G.nameOver[f.id]) refused.push({ id: f.id, short: G.nameShort[f.id],
-      blocked: G.nameBlocked[f.id],
       stillLong: E.bind.wrapFor(f, tooLong(f), E.bind.NAME_EXTRA_MAX).overflow });
     else rec(`${f.id}: a too-long name either grows or is flagged`, false,
              'neither granted a line nor flagged as overflow — silent truncation');
@@ -65,11 +64,12 @@ const grew = [], refused = [];
   rec('every dish either grows a line or says why', grew.length + refused.length === names.length,
       `${grew.length} grew, ${refused.length} refused, ${names.length - grew.length - refused.length} silent`);
   console.log(`     grew   : ${grew.length}/${names.length}`);
-  console.log(`     refused: ${refused.length} — ${refused.map(r => r.id + (r.blocked ? ' (column pinned)' : r.short ? ` (short ${r.short.toFixed(1)}pt)` : ' (needs >2 lines)')).join(', ') || '(none)'}`);
-  /* A refusal must be explicable: either the column is short by a measurable amount, or the column
-     cannot be pushed at all, or the text is simply longer than two lines can hold. What is NOT
-     acceptable is a refusal with no reason. */
-  const unexplained = refused.filter(r => !(r.short > 0) && !r.blocked && !r.stillLong);
+  console.log(`     refused: ${refused.length} — ${refused.map(r => r.id + (r.short ? ` (short ${r.short.toFixed(1)}pt)` : ' (needs >2 lines)')).join(', ') || '(none)'}`);
+  /* A refusal must be explicable: either the column is short by a measurable amount, or the text is
+     simply longer than two lines can hold. What is NOT acceptable is a refusal with no reason.
+     A third case used to exist — a column "pinned" by the footer price list — but that was a
+     containment for the reflow tear, and the tear is now fixed at its source. */
+  const unexplained = refused.filter(r => !(r.short > 0) && !r.stillLong);
   rec('every refusal has a stated reason', !unexplained.length,
       unexplained.map(r => r.id).join(', '));
 }

@@ -1084,13 +1084,53 @@ function opsForPage(fields, priceShift, skip, fieldShift){
 // ===================== ADD-ITEM ENGINE (appends native new items) =====================
 function jFmt(v){ let s=(+v).toFixed(4).replace(/0+$/,'').replace(/\.$/,''); return s||'0'; }
 function jEsc(s){ return normTypo(s).replace(/\\/g,'\\\\').replace(/\(/g,'\\(').replace(/\)/g,'\\)'); }
-function jStamp(parts, tx, ty){
+function jStamp(parts, tx, ty, s){
+  const k=(s==null||!(s>0))?1:s;
   let out='';
   for(const p of parts){
-    const b=p.bytes.replace(/1 0 0 1 -?[\d.]+ -?[\d.]+ cm/, '1 0 0 1 '+jFmt(tx+p.dx)+' '+jFmt(ty+p.dy)+' cm');
+    /* The whole template is scaled by rewriting the `cm` matrix, not the path data — so the
+       designer's own curves are reproduced exactly, just smaller. Each part's own dx/dy is in
+       TEMPLATE space and must be scaled with it, or a multi-part icon comes apart. */
+    const b=p.bytes.replace(/1 0 0 1 -?[\d.]+ -?[\d.]+ cm/,
+      jFmt(k)+' 0 0 '+jFmt(k)+' '+jFmt(tx+p.dx*k)+' '+jFmt(ty+p.dy*k)+' cm');
     out+=p.color+' '+b+'\n';
   }
   return out;
+}
+/* Ink box of an ICONS template, in template space, with each part's own dx/dy applied. Parses the
+   path's numbers with the framing `cm` stripped; the |v|>60 filter drops the absolute page origin
+   the template was harvested at (the NEW badge's is x 754.24, off a 595pt-wide page). */
+const _tplBox={};
+function templateBox(name){
+  if(_tplBox[name]!==undefined) return _tplBox[name];
+  const t=ICONS&&ICONS[name];
+  if(!t||!t.length) return (_tplBox[name]=null);
+  let mnx=Infinity,mxx=-Infinity,mny=Infinity,mxy=-Infinity;
+  for(const p of t){
+    const nums=(String(p.bytes||'').replace(/q [^\n]*cm/,' ').match(/-?\d+(?:\.\d+)?/g)||[]).map(Number);
+    for(let i=0;i+1<nums.length;i+=2){
+      const x=nums[i]+(+p.dx||0), y=nums[i+1]+(+p.dy||0);
+      if(Math.abs(nums[i])>60||Math.abs(nums[i+1])>60) continue;
+      if(x<mnx)mnx=x; if(x>mxx)mxx=x; if(y<mny)mny=y; if(y>mxy)mxy=y;
+    }
+  }
+  return (_tplBox[name]=isFinite(mnx)?{minX:mnx,w:mxx-mnx,minY:mny,h:mxy-mny}:null);
+}
+/* Effective geometry for one marker: `marker_geo` as declared, EXCEPT for the NEW badge.
+   The badge template is stored UNSCALED. `add_const.icon_scale_applied` (0.6267) records the size
+   the designer's own badge is drawn at, but jStamp only ever rewrote the translate — so ticking NEW
+   stamped a badge 1.6x the one the menu already prints. `marker_geo.new` compounds it: w:22 is
+   neither the template width (20.024) nor the scaled one (12.549). Measured across all eight baked
+   badges the real ink is 12.48-12.54pt, i.e. exactly template x scale. So the badge's geometry is
+   DERIVED from the artwork and the scale rather than read from either wrong number. */
+const NEW_CENTRE=5.26;   // ink centre above the baseline, median of the eight baked badges
+function markerGeomFor(m){
+  const g=Object.assign({dy:0,ox:0,w:8}, (AC&&AC.marker_geo&&AC.marker_geo[m])||{});
+  const s=(AC&&+AC.icon_scale_applied)||0;
+  if(m!=='new'||!(s>0)) return g;
+  const b=templateBox('new');
+  if(!b) return g;
+  return { scale:s, ox:b.minX*s, w:b.w*s, dy:NEW_CENTRE-((b.minY+b.h/2)*s) };
 }
 function descWidthFor(sec){           // chars per desc line for a section (mono advance)
   const C=AC, w=(sec.price_right||sec.col_x+233)-sec.col_x-14;
@@ -1153,7 +1193,7 @@ function markerBody(al, bx, baseline){
   const set=new Set(al); let cur=bx, body='';
   for(const m of order){
     if(!set.has(m)) continue;
-    const g=geo[m]||{dy:0,ox:0,w:8};
+    const g=markerGeomFor(m);
     if(m==='korea'){   // the menu's own flag artwork, re-stamped verbatim (see koreaTemplate)
       const kt=koreaTemplate();
       body+=koreaStamp(cur, baseline, g);
@@ -1161,8 +1201,8 @@ function markerBody(al, bx, baseline){
       continue;
     }
     if(!ICONS||!ICONS[m]) continue;
-    body+=jStamp(ICONS[m], cur-(g.ox||0), baseline+(g.dy||0));   // align icon's visual left to cur
-    cur+=(g.w||8)+gap;                                            // advance by real icon width
+    body+=jStamp(ICONS[m], cur-(g.ox||0), baseline+(g.dy||0), g.scale);   // ink left edge on cur
+    cur+=(g.w||8)+gap;                                                     // advance by real ink width
   }
   if(!body) return '';
   /* No ICONS template carries a fill colour of its own, so an appended cluster inherits whatever
@@ -1173,6 +1213,54 @@ function markerBody(al, bx, baseline){
   return ((C&&C.ink_color)||'0 g')+'\n'+body;
 }
 // standalone clip-wrapped marker group (for re-stamping an existing item on allergen toggle)
+/* ---- BAKED NEW BADGES THE FIELDMAP DOES NOT RECORD ------------------------------------------
+   Eight dishes print a gold NEW badge, but no `baked` or `allergens` list mentions `new`. The
+   badge's geometry IS inside `marker_stamps` (its fill operator sits ~21 bytes before the span, a
+   pattern shared by 100 of the 344 stamps), so the re-stamp path DELETES it and then redraws the
+   cluster from `desired` — which cannot contain `new` — and the badge silently vanishes from the
+   printed menu. Verified by render: dropping Jain from KOREAN MANDU removed its NEW badge.
+
+   The artwork is the truth about what is printed, so the badge is recorded on both lists at boot:
+   `baked` so a re-stamp reproduces it, and `allergens` so `desired` matches and no spurious
+   re-stamp fires (which would also break byte identity). Every downstream consumer — the chip
+   state, the delete pass, `sameSet` — then behaves as if the builder had recorded it. */
+const NEW_BADGE_FILL='0.933 0.698 0.169 rg';
+function adoptBakedBadges(){
+  let n=0;
+  for(const f of FM.fields){
+    if(f.role!=='name'||!(f.marker_stamps||[]).length) continue;
+    if((f.baked||[]).includes('new')) continue;
+    const t=pageText(f.page);
+    const has=(f.marker_stamps||[]).some(sp=>
+      t.slice(Math.max(0,sp[0]-40), sp[1]).includes(NEW_BADGE_FILL));
+    if(!has) continue;
+    f.baked=[...(f.baked||[]), 'new'];
+    if(!(f.allergens||[]).includes('new')) f.allergens=[...(f.allergens||[]), 'new'];
+    n++;
+    try{ console.warn('adopted an unrecorded baked NEW badge on '+f.id+' '+String(f.display||'').trim()); }catch(_){ }
+  }
+  return n;
+}
+/* Where a dish's marker cluster starts.
+   `marker_bx` is the designer's own anchor and is normally right, but it is fieldmap data and one
+   entry is not: SRI LANKAN CURRY (0:63) sits at x 26.99 with a `marker_bx` of 435.87 — 409pt away,
+   in the NEXT COLUMN. Toggling any marker on it stamped dairy and gluten onto AVO CRISPY RICE, i.e.
+   allergen icons on the wrong dish. Verified by render.
+   So the anchor is validated rather than trusted: it must sit inside the dish's own column and
+   within a sane distance of the name's right edge, otherwise fall back to the computed position.
+   The fallback is the same expression the fieldmap's own anchors follow (name end + marker_gap). */
+function markerAnchor(f){
+  const adv=(ADV&&ADV.name)||0.587, gap=(AC&&AC.marker_gap!=null)?AC.marker_gap:4;
+  const nameEnd=f.x+String(f.display||'').length*adv*(f.size||11);
+  const fallback=nameEnd+gap;
+  const bx=f.marker_bx;
+  if(bx==null) return fallback;
+  const col=(pageColumns(f.page)||[]).find(c=>f.x>=c.min&&f.x<c.max);
+  if(col && (bx<col.min || bx>=col.max)) return fallback;   // anchor escaped the dish's own column
+  if(bx < f.x) return fallback;                             // anchor left of the name
+  if(bx - nameEnd > 120) return fallback;                   // implausibly far past the name
+  return bx;
+}
 function markerGroup(al, bx, baseline, page){
   const body=markerBody(al,bx,baseline); if(!body) return '';
   const sz=PAGES[page]||[595.276,841.89];
@@ -1439,8 +1527,7 @@ async function regenerate(){
       }
       for(const sp of (f.marker_stamps||[])) allerDelSpans.push(sp);   // remove this item's baked stamps
       const d=itemShift(f, st.removedSlots, st.growSlots);
-      const bx=((f.marker_bx!=null)?f.marker_bx:(f.x+(f.display||'').length*ADV.name*f.size+(AC.marker_gap||7)))+_ndx;
-      markerAddStr += markerGroup(desired, bx, f.y + d, p);
+      markerAddStr += markerGroup(desired, markerAnchor(f)+_ndx, f.y + d, p);
     }
     for(const sp of allerDelSpans) ops.push({s:sp[0],e:sp[1],rep:enc(keepFont(sp,p))});
     if(allerDelSpans.length){
@@ -2321,6 +2408,7 @@ async function boot(){
       const stream=doc.context.lookup(ref);
       pageStreams.push({ref, dict:stream.dict, pristine:stream.contents.slice()});
     }
+    adoptBakedBadges();          // before buildEditor(): it changes what the marker chips show
     buildEditor(); try{MEM.init();}catch(e){console.error(e);}
     await regenerate(); await renderPreview();
     document.getElementById('boot').style.display='none';
