@@ -86,6 +86,8 @@ header.bar{display:flex;align-items:center;gap:16px;padding:10px 18px;border-bot
 .seclbl{display:block;font-size:10.5px;letter-spacing:.05em;text-transform:uppercase;color:var(--muted);margin-bottom:4px}
 .secinp{width:100%;background:#100E09;border:1px solid var(--line2);border-radius:7px;color:var(--cream);font-family:var(--mono);font-size:13.5px;padding:8px 10px;outline:none}
 .secinp:focus{border-color:var(--aiko-line)}
+/* a category name / decorative label containing a glyph its subset font cannot print */
+.secinp.badglyph{border-color:#E03A2E;background:rgba(224,58,46,.10)}
 .secinp.script{color:#E7B84F;font-style:italic}
 #export{background:var(--aiko);color:#1a1400;font-weight:700;letter-spacing:.03em;padding:9px 16px;border-radius:9px;font-size:13px;transition:.15s}
 #export:hover{filter:brightness(1.07);transform:translateY(-1px)}
@@ -538,9 +540,56 @@ function fitDesc(f,val,extra){  // use every line that fits; only then shrink th
    leftmost price to its RIGHT (same column), less the marker cluster the name must not run under.
    The cluster slides right with a longer name (see the marker pass), so only its WIDTH is reserved.
    Clamped with Math.max so this can only ever widen a budget, never narrow one. */
+/* ---- NAME WIDTH: the runs carry tracking, and it is not optional -----------------------------
+   Aiko's name runs are set with `-0.024 Tc 0.024 Tw`. PDF advances a glyph by
+   `(w0/1000*Tfs + Tc + Tw_if_space) * Th`, and the point size lives in the Tm, so a character
+   advances `(0.587 - 0.024) = 0.563 em` while a SPACE advances the full `0.587` — the Tw exactly
+   cancels the Tc. Measured: TTEOKBOKKI, the one probe name with no spaces, has a glyph pitch of
+   0.5618 em against a predicted 0.563.
+   Unlike Capiche (whose Tw is negative, so ignoring it over-estimates and is safe), Aiko's Tw is
+   POSITIVE — ignoring it would UNDER-estimate any name containing a space, which is the unsafe
+   direction for a capacity budget. Both terms are therefore applied.
+   Tc is read per field because it is inherited graphics state: 40 of 46 names inherit -0.024, six
+   inherit 0. */
+function readRunTracking(){
+  for(const f of FM.fields){
+    if(f.role!=='name'&&f.role!=='desc') continue;
+    const spans=f.lines? f.lines.flat() : (f.line_spans||[]);
+    const first=spans.length? (Array.isArray(spans[0])?spans[0][0]:spans[0]) : null;
+    if(first==null) continue;
+    const t=pageText(f.page);
+    const pick=(op)=>{ const i=t.lastIndexOf(' '+op, first); if(i<=0) return 0;
+      const m=/(-?[\d.]+)\s*$/.exec(t.slice(Math.max(0,i-24), i)); return m? parseFloat(m[1]) : 0; };
+    const tc=pick('Tc'), tw=pick('Tw');
+    f.tc=isFinite(tc)?tc:0; f.tw=isFinite(tw)?tw:0;
+  }
+}
+const _advBase=()=>((typeof ADV!=='undefined'&&ADV&&ADV.name)||0.587);
+/** Advance of one non-space name character, tracking included. */
+function nameAdv(f){ return (_advBase()+(f.tc!=null?f.tc:0))*(f.size||11); }
+/** Rendered width of a name string on this field, spaces charged at their own advance. */
+function nameWidth(f,s){
+  const v=String(s==null?'':s), sp=(v.match(/ /g)||[]).length;
+  return v.length*nameAdv(f) + sp*((f.tw!=null?f.tw:0)*(f.size||11));
+}
+/** Ink width of a marker cluster, gaps included — what markerBody actually lays out. */
+function markerClusterWidth(al){
+  const set=al instanceof Set? al : new Set(al||[]);
+  const order=(AC&&AC.marker_order)||(BRAND&&BRAND.markers)||[];
+  const gap=(AC&&AC.icon_gap!=null)?AC.icon_gap:1.7;
+  let w=0,n=0;
+  for(const m of order){ if(!set.has(m)) continue;
+    const g=markerGeomFor(m); w+=(g.w||8); n++; }
+  return n? w+gap*(n-1) : 0;
+}
+const NAME_CLEAR=2.0;    // ink slack required between the marker row and the price
 const _nameBudget={};
 function nameBudgetChars(f){
-  if(_nameBudget[f.id]!=null) return _nameBudget[f.id];
+  /* The cluster width depends on the dish's CURRENT marker set, so the cache is keyed by it. */
+  const set=(f.id in allerEdits)? new Set(allerEdits[f.id]) : new Set(f.allergens||[]);
+  const order=(AC&&AC.marker_order)||[];
+  const key=f.id+'|'+order.filter(t=>set.has(t)).join(',');
+  if(_nameBudget[key]!=null) return _nameBudget[key];
   const base=f.max_chars||12;
   let px=null;
   for(const q of FM.fields){
@@ -550,12 +599,20 @@ function nameBudgetChars(f){
     if(Math.abs(q.y-f.y)>8) continue;                   // and on this dish's own row
     if(px==null||x<px) px=x;
   }
-  if(px==null) return (_nameBudget[f.id]=base);
-  const C=(typeof AC!=='undefined'&&AC)||{}, adv=((typeof ADV!=='undefined'&&ADV&&ADV.name)||0.63);
-  const offs=(f.markers||f.baked||[]).map(m=>C['icon_'+(m==='jain'?'j':m)]).filter(Boolean);
-  const clusterW=offs.length? Math.max.apply(null,offs.map(o=>o[0]))+6 : 0;
-  const n=Math.floor((px-f.x-clusterW-8)/(adv*f.size));
-  return (_nameBudget[f.id]=Math.max(base, n));
+  if(px==null) return (_nameBudget[key]=base);
+  /* The cluster reservation used to look up `add_const.icon_dairy` / `icon_gluten` / `icon_j` —
+     CAPICHE's key names. Aiko keeps its geometry in `marker_geo` and has no such keys, so the
+     lookup always failed and `clusterW` was ALWAYS 0 despite the comment claiming otherwise.
+     Consequence: 42 of 46 dishes overran their own price when typed to the budget the UI allowed.
+     It now asks the same function markerBody lays the row out with. */
+  const gap=(AC&&AC.marker_gap!=null)?AC.marker_gap:4;
+  const room=px-NAME_CLEAR-markerClusterWidth(set)-(set.size?gap:0);
+  const n=Math.floor((room-f.x)/nameAdv(f));
+  /* Never advertise less than the artwork already prints — the baked name is measured proof that
+     it fits. Stands down if it would actually overlap (it does not on any of the 46). */
+  let floorN=String(f.display||'').trim().length;
+  if(floorN>n && f.x+nameWidth(f,String(f.display||'').trim())+(set.size?gap:0)+markerClusterWidth(set)>px) floorN=0;
+  return (_nameBudget[key]=Math.max(1, n, floorN));
 }
 function wrapFor(f,val,extra){ if(f.role==='name') return wrapName(val,nameBudgetChars(f),f.lines.length); const t=fitDesc(f,val,extra); return {lines:t.lines, overflow:t.overflow}; }
 function isOverflow(f,val,extra){ return wrapFor(f,val,extra).overflow; }
@@ -1084,13 +1141,53 @@ function opsForPage(fields, priceShift, skip, fieldShift){
 // ===================== ADD-ITEM ENGINE (appends native new items) =====================
 function jFmt(v){ let s=(+v).toFixed(4).replace(/0+$/,'').replace(/\.$/,''); return s||'0'; }
 function jEsc(s){ return normTypo(s).replace(/\\/g,'\\\\').replace(/\(/g,'\\(').replace(/\)/g,'\\)'); }
-function jStamp(parts, tx, ty){
+function jStamp(parts, tx, ty, s){
+  const k=(s==null||!(s>0))?1:s;
   let out='';
   for(const p of parts){
-    const b=p.bytes.replace(/1 0 0 1 -?[\d.]+ -?[\d.]+ cm/, '1 0 0 1 '+jFmt(tx+p.dx)+' '+jFmt(ty+p.dy)+' cm');
+    /* The whole template is scaled by rewriting the `cm` matrix, not the path data — so the
+       designer's own curves are reproduced exactly, just smaller. Each part's own dx/dy is in
+       TEMPLATE space and must be scaled with it, or a multi-part icon comes apart. */
+    const b=p.bytes.replace(/1 0 0 1 -?[\d.]+ -?[\d.]+ cm/,
+      jFmt(k)+' 0 0 '+jFmt(k)+' '+jFmt(tx+p.dx*k)+' '+jFmt(ty+p.dy*k)+' cm');
     out+=p.color+' '+b+'\n';
   }
   return out;
+}
+/* Ink box of an ICONS template, in template space, with each part's own dx/dy applied. Parses the
+   path's numbers with the framing `cm` stripped; the |v|>60 filter drops the absolute page origin
+   the template was harvested at (the NEW badge's is x 754.24, off a 595pt-wide page). */
+const _tplBox={};
+function templateBox(name){
+  if(_tplBox[name]!==undefined) return _tplBox[name];
+  const t=ICONS&&ICONS[name];
+  if(!t||!t.length) return (_tplBox[name]=null);
+  let mnx=Infinity,mxx=-Infinity,mny=Infinity,mxy=-Infinity;
+  for(const p of t){
+    const nums=(String(p.bytes||'').replace(/q [^\n]*cm/,' ').match(/-?\d+(?:\.\d+)?/g)||[]).map(Number);
+    for(let i=0;i+1<nums.length;i+=2){
+      const x=nums[i]+(+p.dx||0), y=nums[i+1]+(+p.dy||0);
+      if(Math.abs(nums[i])>60||Math.abs(nums[i+1])>60) continue;
+      if(x<mnx)mnx=x; if(x>mxx)mxx=x; if(y<mny)mny=y; if(y>mxy)mxy=y;
+    }
+  }
+  return (_tplBox[name]=isFinite(mnx)?{minX:mnx,w:mxx-mnx,minY:mny,h:mxy-mny}:null);
+}
+/* Effective geometry for one marker: `marker_geo` as declared, EXCEPT for the NEW badge.
+   The badge template is stored UNSCALED. `add_const.icon_scale_applied` (0.6267) records the size
+   the designer's own badge is drawn at, but jStamp only ever rewrote the translate — so ticking NEW
+   stamped a badge 1.6x the one the menu already prints. `marker_geo.new` compounds it: w:22 is
+   neither the template width (20.024) nor the scaled one (12.549). Measured across all eight baked
+   badges the real ink is 12.48-12.54pt, i.e. exactly template x scale. So the badge's geometry is
+   DERIVED from the artwork and the scale rather than read from either wrong number. */
+const NEW_CENTRE=5.26;   // ink centre above the baseline, median of the eight baked badges
+function markerGeomFor(m){
+  const g=Object.assign({dy:0,ox:0,w:8}, (AC&&AC.marker_geo&&AC.marker_geo[m])||{});
+  const s=(AC&&+AC.icon_scale_applied)||0;
+  if(m!=='new'||!(s>0)) return g;
+  const b=templateBox('new');
+  if(!b) return g;
+  return { scale:s, ox:b.minX*s, w:b.w*s, dy:NEW_CENTRE-((b.minY+b.h/2)*s) };
 }
 function descWidthFor(sec){           // chars per desc line for a section (mono advance)
   const C=AC, w=(sec.price_right||sec.col_x+233)-sec.col_x-14;
@@ -1153,7 +1250,7 @@ function markerBody(al, bx, baseline){
   const set=new Set(al); let cur=bx, body='';
   for(const m of order){
     if(!set.has(m)) continue;
-    const g=geo[m]||{dy:0,ox:0,w:8};
+    const g=markerGeomFor(m);
     if(m==='korea'){   // the menu's own flag artwork, re-stamped verbatim (see koreaTemplate)
       const kt=koreaTemplate();
       body+=koreaStamp(cur, baseline, g);
@@ -1161,8 +1258,8 @@ function markerBody(al, bx, baseline){
       continue;
     }
     if(!ICONS||!ICONS[m]) continue;
-    body+=jStamp(ICONS[m], cur-(g.ox||0), baseline+(g.dy||0));   // align icon's visual left to cur
-    cur+=(g.w||8)+gap;                                            // advance by real icon width
+    body+=jStamp(ICONS[m], cur-(g.ox||0), baseline+(g.dy||0), g.scale);   // ink left edge on cur
+    cur+=(g.w||8)+gap;                                                     // advance by real ink width
   }
   if(!body) return '';
   /* No ICONS template carries a fill colour of its own, so an appended cluster inherits whatever
@@ -1173,6 +1270,54 @@ function markerBody(al, bx, baseline){
   return ((C&&C.ink_color)||'0 g')+'\n'+body;
 }
 // standalone clip-wrapped marker group (for re-stamping an existing item on allergen toggle)
+/* ---- BAKED NEW BADGES THE FIELDMAP DOES NOT RECORD ------------------------------------------
+   Eight dishes print a gold NEW badge, but no `baked` or `allergens` list mentions `new`. The
+   badge's geometry IS inside `marker_stamps` (its fill operator sits ~21 bytes before the span, a
+   pattern shared by 100 of the 344 stamps), so the re-stamp path DELETES it and then redraws the
+   cluster from `desired` — which cannot contain `new` — and the badge silently vanishes from the
+   printed menu. Verified by render: dropping Jain from KOREAN MANDU removed its NEW badge.
+
+   The artwork is the truth about what is printed, so the badge is recorded on both lists at boot:
+   `baked` so a re-stamp reproduces it, and `allergens` so `desired` matches and no spurious
+   re-stamp fires (which would also break byte identity). Every downstream consumer — the chip
+   state, the delete pass, `sameSet` — then behaves as if the builder had recorded it. */
+const NEW_BADGE_FILL='0.933 0.698 0.169 rg';
+function adoptBakedBadges(){
+  let n=0;
+  for(const f of FM.fields){
+    if(f.role!=='name'||!(f.marker_stamps||[]).length) continue;
+    if((f.baked||[]).includes('new')) continue;
+    const t=pageText(f.page);
+    const has=(f.marker_stamps||[]).some(sp=>
+      t.slice(Math.max(0,sp[0]-40), sp[1]).includes(NEW_BADGE_FILL));
+    if(!has) continue;
+    f.baked=[...(f.baked||[]), 'new'];
+    if(!(f.allergens||[]).includes('new')) f.allergens=[...(f.allergens||[]), 'new'];
+    n++;
+    try{ console.warn('adopted an unrecorded baked NEW badge on '+f.id+' '+String(f.display||'').trim()); }catch(_){ }
+  }
+  return n;
+}
+/* Where a dish's marker cluster starts.
+   `marker_bx` is the designer's own anchor and is normally right, but it is fieldmap data and one
+   entry is not: SRI LANKAN CURRY (0:63) sits at x 26.99 with a `marker_bx` of 435.87 — 409pt away,
+   in the NEXT COLUMN. Toggling any marker on it stamped dairy and gluten onto AVO CRISPY RICE, i.e.
+   allergen icons on the wrong dish. Verified by render.
+   So the anchor is validated rather than trusted: it must sit inside the dish's own column and
+   within a sane distance of the name's right edge, otherwise fall back to the computed position.
+   The fallback is the same expression the fieldmap's own anchors follow (name end + marker_gap). */
+function markerAnchor(f){
+  const adv=(ADV&&ADV.name)||0.587, gap=(AC&&AC.marker_gap!=null)?AC.marker_gap:4;
+  const nameEnd=f.x+String(f.display||'').length*adv*(f.size||11);
+  const fallback=nameEnd+gap;
+  const bx=f.marker_bx;
+  if(bx==null) return fallback;
+  const col=(pageColumns(f.page)||[]).find(c=>f.x>=c.min&&f.x<c.max);
+  if(col && (bx<col.min || bx>=col.max)) return fallback;   // anchor escaped the dish's own column
+  if(bx < f.x) return fallback;                             // anchor left of the name
+  if(bx - nameEnd > 120) return fallback;                   // implausibly far past the name
+  return bx;
+}
 function markerGroup(al, bx, baseline, page){
   const body=markerBody(al,bx,baseline); if(!body) return '';
   const sz=PAGES[page]||[595.276,841.89];
@@ -1424,7 +1569,8 @@ async function regenerate(){
          line, the one the markers follow, exactly as the grams tag does. */
       const _lastLine=s=>{ const L=wrapName(String(s||''),nameBudgetChars(f),f.lines.length).lines.filter(Boolean);
                            return L.length? L[L.length-1] : ''; };
-      const _ndx=(f.id in edits)? (_lastLine(edits[f.id]).length-_lastLine(f.display).length)*ADV.name*f.size : 0;
+      // Tc-aware: ADV.name alone over-measures every name by 4.1% (see nameAdv)
+      const _ndx=(f.id in edits)? (nameWidth(f,_lastLine(edits[f.id]))-nameWidth(f,_lastLine(f.display))) : 0;
       if(sameSet && Math.abs(_ndx)<0.005) continue;                    // pristine already correct
       if(sameSet){
         /* MOVE ONLY — slide the designer's own icon artwork rather than re-drawing it. Each baked
@@ -1439,8 +1585,7 @@ async function regenerate(){
       }
       for(const sp of (f.marker_stamps||[])) allerDelSpans.push(sp);   // remove this item's baked stamps
       const d=itemShift(f, st.removedSlots, st.growSlots);
-      const bx=((f.marker_bx!=null)?f.marker_bx:(f.x+(f.display||'').length*ADV.name*f.size+(AC.marker_gap||7)))+_ndx;
-      markerAddStr += markerGroup(desired, bx, f.y + d, p);
+      markerAddStr += markerGroup(desired, markerAnchor(f)+_ndx, f.y + d, p);
     }
     for(const sp of allerDelSpans) ops.push({s:sp[0],e:sp[1],rep:enc(keepFont(sp,p))});
     if(allerDelSpans.length){
@@ -1614,8 +1759,15 @@ function labelVectorSpan(f){
   if(f._vec!==undefined) return f._vec;
   if(f.kind!=='script'||!f.run_span) return f._vec=null;
   const t=pageText(f.page), start=f.run_span[1];
-  const nextBT=t.indexOf('BT',start); if(nextBT<0) return f._vec=null;
-  const seg=t.slice(start,nextBT);
+  /* The overlay runs from the label's text to the NEXT text block. DESSERTS is the last text block
+     on page 1, so `indexOf('BT')` returned -1 and this bailed — leaving that label with no vector
+     span at all. The consequences were both silent: the delete-on-edit was skipped, so renaming
+     "sweet" left its old stroked outline painted underneath; and the `_flourishGone` guard read
+     false, so the flourish_cm rewrite fired and nudged ONE of the label's five outline groups.
+     Neither is visible to a text-based assertion — the overlay is stroked paths, not text.
+     With no following block, the span simply ends where the stream's content does. */
+  const nextBT=t.indexOf('BT',start);
+  const seg=t.slice(start, nextBT<0 ? t.length : nextBT);
   const first=seg.search(/q 1 0 0 1 -?[\d.]+ -?[\d.]+ cm/), lastQ=seg.lastIndexOf('\nQ\n');
   if(first<0||lastQ<0||lastQ<first) return f._vec=null;
   return f._vec=[start+first, start+lastQ+1];
@@ -1819,6 +1971,12 @@ function buildSectionPanel(ed){
       inp.oninput=()=>{
         const okNow=check();
         if(inp.value===f.display) delete edits[f.id]; else edits[f.id]=inp.value;
+        /* Mark the field itself, so the export gate can see it. `updateGate` counts unprintable
+           glyphs from `.gl` spans inside `.name`/`.desc` only — a section input is `.secinp` and
+           renders no such span, so a category name containing a letter the 20-glyph serif subset
+           lacks (there is no `P`, so "Plates" is impossible) used to be written straight into
+           `edits`, emitted verbatim by `escPdf`, and shipped behind a green "All clear". */
+        inp.classList.toggle('badglyph', !okNow);
         try{ MEM.tick(); }catch(_){}
         if(okNow) schedulePreview();
         updateGate();
@@ -2038,6 +2196,8 @@ function updateGate(){
   // prints it; only flags on text the user edited (or added) block export
   document.querySelectorAll('.name,.desc').forEach(el=>{ const n=el.querySelectorAll('.sp').length; if(!n) return; if(el.dataset.id in edits) sp+=n; else spBase+=n; });
   document.querySelectorAll('.name .gl,.desc .gl').forEach(()=>gl++);
+  // category names and decorative labels count too — they print the same PDF
+  document.querySelectorAll('.secinp.badglyph').forEach(()=>gl++);
   document.querySelectorAll('.price.err').forEach(()=>pe++);
   document.querySelectorAll('.card').forEach(c=>{
     const g=c.querySelector('.gl'),s=c.querySelector('.sp'),h=c.querySelector('.hint'); if(!h) return;
@@ -2207,8 +2367,13 @@ function sayChucky(msg, ms){
 // ---- edit-memory glue (aiko) ----
 const MEM_BRAND='aiko';
 let memBaseVer='';
-function memSnapshot(){ return { edits:{...edits}, removed:[...removed], added, order:JSON.parse(JSON.stringify(order)), persona:{...persona} }; }
-function memApply(st){ for(const k in edits) delete edits[k]; Object.assign(edits, st.edits||{}); removed=new Set(st.removed||[]); added=st.added||[]; order=st.order?JSON.parse(JSON.stringify(st.order)):{}; persona=Object.assign({occasion:'',guest:''}, st.persona||{}); }
+/* `allerEdits` belongs in the snapshot. Without it a marker toggle was invisible to `dirty()`, so
+   the autosave never fired, the "Saved" indicator never lit, an explicit version-history entry was
+   a no-op, and the toggle was silently dropped on resume — while an ADDED item's markers survived,
+   because those live inside `added`. That asymmetry read as a bug rather than a limitation. */
+function memSnapshot(){ return { edits:{...edits}, removed:[...removed], added, order:JSON.parse(JSON.stringify(order)), persona:{...persona}, allerEdits:JSON.parse(JSON.stringify(allerEdits)) }; }
+function memApply(st){ for(const k in edits) delete edits[k]; Object.assign(edits, st.edits||{}); removed=new Set(st.removed||[]); added=st.added||[]; order=st.order?JSON.parse(JSON.stringify(st.order)):{}; persona=Object.assign({occasion:'',guest:''}, st.persona||{});
+  for(const k in allerEdits) delete allerEdits[k]; Object.assign(allerEdits, st.allerEdits||{}); }
 function memRebuild(){ buildEditor(); regenerate().then(renderPreview); }
 // ============ EDIT MEMORY — autosave + resume + version history (per brand) ============
 // Glue each editor must define BEFORE this block:
@@ -2321,6 +2486,8 @@ async function boot(){
       const stream=doc.context.lookup(ref);
       pageStreams.push({ref, dict:stream.dict, pristine:stream.contents.slice()});
     }
+    readRunTracking();           // per-field Tc/Tw, needed by every name width calculation
+    adoptBakedBadges();          // before buildEditor(): it changes what the marker chips show
     buildEditor(); try{MEM.init();}catch(e){console.error(e);}
     await regenerate(); await renderPreview();
     document.getElementById('boot').style.display='none';
