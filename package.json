@@ -6,6 +6,7 @@
   "scripts": {
     "deploy": "cd deploy && wrangler deploy",
     "dev": "cd deploy && wrangler dev",
+    "dev:lan": "cd deploy && wrangler dev --ip 0.0.0.0 --port 8787",
     "netlify:dev": "netlify dev",
     "food:build": "node src/capiche/build_food.js",
     "test:food": "node foodh.js",

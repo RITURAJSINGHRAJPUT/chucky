@@ -66,6 +66,8 @@ const BRIDGE = `;globalThis.__engine = {
     const m = this.markerStore(); if(m) for(const k of Object.keys(m)) delete m[k];
     if(typeof removed !== 'undefined' && removed && removed.clear) removed.clear();
     if(typeof added !== 'undefined' && Array.isArray(added)) added.length = 0;
+    // ADD-ONS block (capiche): back to the baked rows + no heading
+    try{ if(typeof addons !== 'undefined' && addons && typeof addonsInit === 'function') addonsInit(); }catch(_){}
   },
   bind: {},
 };`;

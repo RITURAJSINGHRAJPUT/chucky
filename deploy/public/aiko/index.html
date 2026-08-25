@@ -86,6 +86,8 @@ header.bar{display:flex;align-items:center;gap:16px;padding:10px 18px;border-bot
 .seclbl{display:block;font-size:10.5px;letter-spacing:.05em;text-transform:uppercase;color:var(--muted);margin-bottom:4px}
 .secinp{width:100%;background:#100E09;border:1px solid var(--line2);border-radius:7px;color:var(--cream);font-family:var(--mono);font-size:13.5px;padding:8px 10px;outline:none}
 .secinp:focus{border-color:var(--aiko-line)}
+/* a category name / decorative label containing a glyph its subset font cannot print */
+.secinp.badglyph{border-color:#E03A2E;background:rgba(224,58,46,.10)}
 .secinp.script{color:#E7B84F;font-style:italic}
 #export{background:var(--aiko);color:#1a1400;font-weight:700;letter-spacing:.03em;padding:9px 16px;border-radius:9px;font-size:13px;transition:.15s}
 #export:hover{filter:brightness(1.07);transform:translateY(-1px)}
@@ -538,9 +540,56 @@ function fitDesc(f,val,extra){  // use every line that fits; only then shrink th
    leftmost price to its RIGHT (same column), less the marker cluster the name must not run under.
    The cluster slides right with a longer name (see the marker pass), so only its WIDTH is reserved.
    Clamped with Math.max so this can only ever widen a budget, never narrow one. */
+/* ---- NAME WIDTH: the runs carry tracking, and it is not optional -----------------------------
+   Aiko's name runs are set with `-0.024 Tc 0.024 Tw`. PDF advances a glyph by
+   `(w0/1000*Tfs + Tc + Tw_if_space) * Th`, and the point size lives in the Tm, so a character
+   advances `(0.587 - 0.024) = 0.563 em` while a SPACE advances the full `0.587` — the Tw exactly
+   cancels the Tc. Measured: TTEOKBOKKI, the one probe name with no spaces, has a glyph pitch of
+   0.5618 em against a predicted 0.563.
+   Unlike Capiche (whose Tw is negative, so ignoring it over-estimates and is safe), Aiko's Tw is
+   POSITIVE — ignoring it would UNDER-estimate any name containing a space, which is the unsafe
+   direction for a capacity budget. Both terms are therefore applied.
+   Tc is read per field because it is inherited graphics state: 40 of 46 names inherit -0.024, six
+   inherit 0. */
+function readRunTracking(){
+  for(const f of FM.fields){
+    if(f.role!=='name'&&f.role!=='desc') continue;
+    const spans=f.lines? f.lines.flat() : (f.line_spans||[]);
+    const first=spans.length? (Array.isArray(spans[0])?spans[0][0]:spans[0]) : null;
+    if(first==null) continue;
+    const t=pageText(f.page);
+    const pick=(op)=>{ const i=t.lastIndexOf(' '+op, first); if(i<=0) return 0;
+      const m=/(-?[\d.]+)\s*$/.exec(t.slice(Math.max(0,i-24), i)); return m? parseFloat(m[1]) : 0; };
+    const tc=pick('Tc'), tw=pick('Tw');
+    f.tc=isFinite(tc)?tc:0; f.tw=isFinite(tw)?tw:0;
+  }
+}
+const _advBase=()=>((typeof ADV!=='undefined'&&ADV&&ADV.name)||0.587);
+/** Advance of one non-space name character, tracking included. */
+function nameAdv(f){ return (_advBase()+(f.tc!=null?f.tc:0))*(f.size||11); }
+/** Rendered width of a name string on this field, spaces charged at their own advance. */
+function nameWidth(f,s){
+  const v=String(s==null?'':s), sp=(v.match(/ /g)||[]).length;
+  return v.length*nameAdv(f) + sp*((f.tw!=null?f.tw:0)*(f.size||11));
+}
+/** Ink width of a marker cluster, gaps included — what markerBody actually lays out. */
+function markerClusterWidth(al){
+  const set=al instanceof Set? al : new Set(al||[]);
+  const order=(AC&&AC.marker_order)||(BRAND&&BRAND.markers)||[];
+  const gap=(AC&&AC.icon_gap!=null)?AC.icon_gap:1.7;
+  let w=0,n=0;
+  for(const m of order){ if(!set.has(m)) continue;
+    const g=markerGeomFor(m); w+=(g.w||8); n++; }
+  return n? w+gap*(n-1) : 0;
+}
+const NAME_CLEAR=2.0;    // ink slack required between the marker row and the price
 const _nameBudget={};
 function nameBudgetChars(f){
-  if(_nameBudget[f.id]!=null) return _nameBudget[f.id];
+  /* The cluster width depends on the dish's CURRENT marker set, so the cache is keyed by it. */
+  const set=(f.id in allerEdits)? new Set(allerEdits[f.id]) : new Set(f.allergens||[]);
+  const order=(AC&&AC.marker_order)||[];
+  const key=f.id+'|'+order.filter(t=>set.has(t)).join(',');
+  if(_nameBudget[key]!=null) return _nameBudget[key];
   const base=f.max_chars||12;
   let px=null;
   for(const q of FM.fields){
@@ -550,12 +599,20 @@ function nameBudgetChars(f){
     if(Math.abs(q.y-f.y)>8) continue;                   // and on this dish's own row
     if(px==null||x<px) px=x;
   }
-  if(px==null) return (_nameBudget[f.id]=base);
-  const C=(typeof AC!=='undefined'&&AC)||{}, adv=((typeof ADV!=='undefined'&&ADV&&ADV.name)||0.63);
-  const offs=(f.markers||f.baked||[]).map(m=>C['icon_'+(m==='jain'?'j':m)]).filter(Boolean);
-  const clusterW=offs.length? Math.max.apply(null,offs.map(o=>o[0]))+6 : 0;
-  const n=Math.floor((px-f.x-clusterW-8)/(adv*f.size));
-  return (_nameBudget[f.id]=Math.max(base, n));
+  if(px==null) return (_nameBudget[key]=base);
+  /* The cluster reservation used to look up `add_const.icon_dairy` / `icon_gluten` / `icon_j` —
+     CAPICHE's key names. Aiko keeps its geometry in `marker_geo` and has no such keys, so the
+     lookup always failed and `clusterW` was ALWAYS 0 despite the comment claiming otherwise.
+     Consequence: 42 of 46 dishes overran their own price when typed to the budget the UI allowed.
+     It now asks the same function markerBody lays the row out with. */
+  const gap=(AC&&AC.marker_gap!=null)?AC.marker_gap:4;
+  const room=px-NAME_CLEAR-markerClusterWidth(set)-(set.size?gap:0);
+  const n=Math.floor((room-f.x)/nameAdv(f));
+  /* Never advertise less than the artwork already prints — the baked name is measured proof that
+     it fits. Stands down if it would actually overlap (it does not on any of the 46). */
+  let floorN=String(f.display||'').trim().length;
+  if(floorN>n && f.x+nameWidth(f,String(f.display||'').trim())+(set.size?gap:0)+markerClusterWidth(set)>px) floorN=0;
+  return (_nameBudget[key]=Math.max(1, n, floorN));
 }
 function wrapFor(f,val,extra){ if(f.role==='name') return wrapName(val,nameBudgetChars(f),f.lines.length); const t=fitDesc(f,val,extra); return {lines:t.lines, overflow:t.overflow}; }
 function isOverflow(f,val,extra){ return wrapFor(f,val,extra).overflow; }
@@ -1512,7 +1569,8 @@ async function regenerate(){
          line, the one the markers follow, exactly as the grams tag does. */
       const _lastLine=s=>{ const L=wrapName(String(s||''),nameBudgetChars(f),f.lines.length).lines.filter(Boolean);
                            return L.length? L[L.length-1] : ''; };
-      const _ndx=(f.id in edits)? (_lastLine(edits[f.id]).length-_lastLine(f.display).length)*ADV.name*f.size : 0;
+      // Tc-aware: ADV.name alone over-measures every name by 4.1% (see nameAdv)
+      const _ndx=(f.id in edits)? (nameWidth(f,_lastLine(edits[f.id]))-nameWidth(f,_lastLine(f.display))) : 0;
       if(sameSet && Math.abs(_ndx)<0.005) continue;                    // pristine already correct
       if(sameSet){
         /* MOVE ONLY — slide the designer's own icon artwork rather than re-drawing it. Each baked
@@ -1701,8 +1759,15 @@ function labelVectorSpan(f){
   if(f._vec!==undefined) return f._vec;
   if(f.kind!=='script'||!f.run_span) return f._vec=null;
   const t=pageText(f.page), start=f.run_span[1];
-  const nextBT=t.indexOf('BT',start); if(nextBT<0) return f._vec=null;
-  const seg=t.slice(start,nextBT);
+  /* The overlay runs from the label's text to the NEXT text block. DESSERTS is the last text block
+     on page 1, so `indexOf('BT')` returned -1 and this bailed — leaving that label with no vector
+     span at all. The consequences were both silent: the delete-on-edit was skipped, so renaming
+     "sweet" left its old stroked outline painted underneath; and the `_flourishGone` guard read
+     false, so the flourish_cm rewrite fired and nudged ONE of the label's five outline groups.
+     Neither is visible to a text-based assertion — the overlay is stroked paths, not text.
+     With no following block, the span simply ends where the stream's content does. */
+  const nextBT=t.indexOf('BT',start);
+  const seg=t.slice(start, nextBT<0 ? t.length : nextBT);
   const first=seg.search(/q 1 0 0 1 -?[\d.]+ -?[\d.]+ cm/), lastQ=seg.lastIndexOf('\nQ\n');
   if(first<0||lastQ<0||lastQ<first) return f._vec=null;
   return f._vec=[start+first, start+lastQ+1];
@@ -1906,6 +1971,12 @@ function buildSectionPanel(ed){
       inp.oninput=()=>{
         const okNow=check();
         if(inp.value===f.display) delete edits[f.id]; else edits[f.id]=inp.value;
+        /* Mark the field itself, so the export gate can see it. `updateGate` counts unprintable
+           glyphs from `.gl` spans inside `.name`/`.desc` only — a section input is `.secinp` and
+           renders no such span, so a category name containing a letter the 20-glyph serif subset
+           lacks (there is no `P`, so "Plates" is impossible) used to be written straight into
+           `edits`, emitted verbatim by `escPdf`, and shipped behind a green "All clear". */
+        inp.classList.toggle('badglyph', !okNow);
         try{ MEM.tick(); }catch(_){}
         if(okNow) schedulePreview();
         updateGate();
@@ -2125,6 +2196,8 @@ function updateGate(){
   // prints it; only flags on text the user edited (or added) block export
   document.querySelectorAll('.name,.desc').forEach(el=>{ const n=el.querySelectorAll('.sp').length; if(!n) return; if(el.dataset.id in edits) sp+=n; else spBase+=n; });
   document.querySelectorAll('.name .gl,.desc .gl').forEach(()=>gl++);
+  // category names and decorative labels count too — they print the same PDF
+  document.querySelectorAll('.secinp.badglyph').forEach(()=>gl++);
   document.querySelectorAll('.price.err').forEach(()=>pe++);
   document.querySelectorAll('.card').forEach(c=>{
     const g=c.querySelector('.gl'),s=c.querySelector('.sp'),h=c.querySelector('.hint'); if(!h) return;
@@ -2294,8 +2367,13 @@ function sayChucky(msg, ms){
 // ---- edit-memory glue (aiko) ----
 const MEM_BRAND='aiko';
 let memBaseVer='';
-function memSnapshot(){ return { edits:{...edits}, removed:[...removed], added, order:JSON.parse(JSON.stringify(order)), persona:{...persona} }; }
-function memApply(st){ for(const k in edits) delete edits[k]; Object.assign(edits, st.edits||{}); removed=new Set(st.removed||[]); added=st.added||[]; order=st.order?JSON.parse(JSON.stringify(st.order)):{}; persona=Object.assign({occasion:'',guest:''}, st.persona||{}); }
+/* `allerEdits` belongs in the snapshot. Without it a marker toggle was invisible to `dirty()`, so
+   the autosave never fired, the "Saved" indicator never lit, an explicit version-history entry was
+   a no-op, and the toggle was silently dropped on resume — while an ADDED item's markers survived,
+   because those live inside `added`. That asymmetry read as a bug rather than a limitation. */
+function memSnapshot(){ return { edits:{...edits}, removed:[...removed], added, order:JSON.parse(JSON.stringify(order)), persona:{...persona}, allerEdits:JSON.parse(JSON.stringify(allerEdits)) }; }
+function memApply(st){ for(const k in edits) delete edits[k]; Object.assign(edits, st.edits||{}); removed=new Set(st.removed||[]); added=st.added||[]; order=st.order?JSON.parse(JSON.stringify(st.order)):{}; persona=Object.assign({occasion:'',guest:''}, st.persona||{});
+  for(const k in allerEdits) delete allerEdits[k]; Object.assign(allerEdits, st.allerEdits||{}); }
 function memRebuild(){ buildEditor(); regenerate().then(renderPreview); }
 // ============ EDIT MEMORY — autosave + resume + version history (per brand) ============
 // Glue each editor must define BEFORE this block:
@@ -2408,6 +2486,7 @@ async function boot(){
       const stream=doc.context.lookup(ref);
       pageStreams.push({ref, dict:stream.dict, pristine:stream.contents.slice()});
     }
+    readRunTracking();           // per-field Tc/Tw, needed by every name width calculation
     adoptBakedBadges();          // before buildEditor(): it changes what the marker chips show
     buildEditor(); try{MEM.init();}catch(e){console.error(e);}
     await regenerate(); await renderPreview();

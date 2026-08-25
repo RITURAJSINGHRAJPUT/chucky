@@ -116,6 +116,22 @@ main.app{display:grid;grid-template-columns:210px 1fr minmax(400px,560px);height
 .price.err{border-color:var(--bad);background:#fff6f6;color:#1a1400}
 .rm{flex:none;width:30px;height:30px;border-radius:7px;color:var(--muted);display:grid;place-items:center;font-size:15px;transition:.13s}
 .rm:hover{color:var(--bad);background:rgba(229,103,94,.1)}
+/* ADD-ONS panel (the page-0 footer price list) */
+.adnrow{display:flex;gap:6px;align-items:center;margin:6px 0}
+.adn{flex:1;min-width:0;background:#100E09;border:1px solid var(--line2);border-radius:7px;color:var(--cream);font-family:var(--mono);font-size:13px;font-weight:600;padding:6px 9px;outline:none;text-transform:uppercase}
+.adn:focus{border-color:var(--aiko-line)}
+.adn.err{border-color:var(--bad);background:#fff6f6;color:#1a1400}
+.adn.over{border-color:rgba(224,145,43,.8)}
+.adhead{display:flex;gap:8px;align-items:center;margin:2px 0 8px}
+.adhead .adn{flex:1}
+.admv{flex:none;width:26px;height:30px;border-radius:7px;color:var(--muted);display:grid;place-items:center;font-size:13px;transition:.13s}
+.admv:hover:not(:disabled){color:var(--cream);background:rgba(233,184,51,.08)}
+.admv:disabled{opacity:.3;cursor:default}
+.adadd{margin-top:8px;background:none;border:1px dashed var(--line2);border-radius:7px;color:var(--muted);cursor:pointer;padding:7px 12px;font-family:var(--mono);font-size:12.5px;transition:.13s}
+.adadd:hover:not(:disabled){color:var(--cream);border-color:var(--aiko-line)}
+.adadd:disabled{opacity:.4;cursor:default}
+.adnote{font-size:11px;color:var(--muted);margin-top:7px}
+.adnote.warn{color:var(--bad)}
 /* An added dish's description PRINTS uppercase (buildItemJS uppercases it), so show it uppercase
    while typing — otherwise the field disagrees with the menu. Done in CSS, never by rewriting the
    text, because rewriting a contentEditable collapses the caret and types backwards. */
@@ -1093,26 +1109,6 @@ function structuralForPage(p, pristine){
       if(_rowNameGrow[j]>0 && ay!=null && ay < ny[j]-0.5) d-=_rowNameGrow[j];
       d+=_secOffset[_rowSec[j]]||0;
       return d; };
-    // DELETE per run: only what the removed dish itself owns. The block's BT/colour/Tf prologue and
-    // any inter-run Tc/Tw survive, so nothing downstream is re-coloured or re-spaced.
-    for(const r of runs){
-      if(r.x<col.min||r.x>col.max) continue;
-      const j=owner(r.y);
-      if(j>=0&&remSet.has(j)) deletes.push(r.span);
-    }
-    // self-contained q..Q artwork sits just ABOVE its own dish's name -> tighter window. `blocks`
-    // is per-icon leaf blocks (see _leafQBlocks), so a multi-icon cluster's second/third icon each
-    // carry their own accurate x/y instead of collapsing into one block keyed off the first.
-    for(const b of blocks){
-      if(b.kind!=='q'||b.x===null||b.y===null||b.x<col.min||b.x>col.max) continue;
-      const j=cidx(b.y);
-      if(_ownsArt(ny[j],b.y,(_rowLines[j]-1)*16)&&remSet.has(j)) deletes.push(b.span);
-    }
-    for(const j of remSet) removedSlots.push({cmin:col.min,cmax:col.max,y:top(j),h:slotH(j)});
-    // SHIFT per anchor, judged on its OWN y -- NOT on ownership. Chrome (section headings) must
-    // still reflow with the column: a heading below a shrunk section has to rise with it, or the
-    // next section's content lands on top of it. Page furniture below the last dish's own slot
-    // (e.g. a legend) is the one exception and stays anchored to the page.
     /* The boundary is the bottom of the DISH FLOW -- the lowest name/desc field in the column, a
        description's baked extra lines discounted -- not `ny[last]-slotH(last)`. That was a guess
        derived from name pitch, and on page 0's right column it landed at 93.71: right through the
@@ -1120,7 +1116,8 @@ function structuralForPage(p, pristine){
        shifted while the three below it did not, so a reflow tore the footer list apart ("120"
        landed on "120/400"). Below the last dish's own text there is, by construction, no dish text
        -- only the legend, the strapline and that price list, none of which may ever move. This is
-       strictly more conservative than what it replaces: it can skip more, never fewer. */
+       strictly more conservative than what it replaces: it can skip more, never fewer.
+       Computed BEFORE the delete sweep because deletes need the same boundary (see below). */
     let flowBottom = Infinity;
     for(const f of FM.fields){
       if(f.page!==p||f.y==null||f.x<col.min||f.x>=col.max) continue;
@@ -1130,6 +1127,33 @@ function structuralForPage(p, pristine){
       if(y<flowBottom) flowBottom=y;
     }
     if(!isFinite(flowBottom)) flowBottom = ny.length? ny[ny.length-1]-slotH(ny.length-1) : 0;
+    // DELETE per run: only what the removed dish itself owns. The block's BT/colour/Tf prologue and
+    // any inter-run Tc/Tw survive, so nothing downstream is re-coloured or re-spaced.
+    /* Page furniture is not deletable either. slotH() is over-estimated for a section's LAST dish,
+       so removing PICANTE (last of page 0's right column, slot read as ~100) put the ADD-ONS row at
+       y 101.54 inside its ownership window and deleted "GHASLET HOT SAUCE" with it — and the
+       containment filter in regenerate() then silently discarded addonOps' rewrite of the same
+       bytes. The flowBottom rule the SHIFT pass already lives by applies verbatim here. */
+    for(const r of runs){
+      if(r.x<col.min||r.x>col.max) continue;
+      if(r.y<flowBottom-0.05) continue;                  // page furniture, never dish-owned
+      const j=owner(r.y);
+      if(j>=0&&remSet.has(j)) deletes.push(r.span);
+    }
+    // self-contained q..Q artwork sits just ABOVE its own dish's name -> tighter window. `blocks`
+    // is per-icon leaf blocks (see _leafQBlocks), so a multi-icon cluster's second/third icon each
+    // carry their own accurate x/y instead of collapsing into one block keyed off the first.
+    for(const b of blocks){
+      if(b.kind!=='q'||b.x===null||b.y===null||b.x<col.min||b.x>col.max) continue;
+      if(b.y<flowBottom-0.05) continue;                  // page furniture, never dish-owned
+      const j=cidx(b.y);
+      if(_ownsArt(ny[j],b.y,(_rowLines[j]-1)*16)&&remSet.has(j)) deletes.push(b.span);
+    }
+    for(const j of remSet) removedSlots.push({cmin:col.min,cmax:col.max,y:top(j),h:slotH(j)});
+    // SHIFT per anchor, judged on its OWN y -- NOT on ownership. Chrome (section headings) must
+    // still reflow with the column: a heading below a shrunk section has to rise with it, or the
+    // next section's content lands on top of it. Page furniture below the last dish's own slot
+    // (e.g. a legend) is the one exception and stays anchored to the page.
     for(const a of anchors){
       if(a.x===null||a.y===null||a.x<col.min||a.x>col.max) continue;
       // 0.05 epsilon: `a.y` is the stream operand (4dp) but flowBottom is built from the fieldmap's
@@ -1230,6 +1254,96 @@ function opsForPage(fields, priceShift, skip, fieldShift){
 }
 
 // ===================== ADD-ITEM ENGINE (appends native new items) =====================
+/* ============================ ADD-ONS (the page-0 footer price list) ============================
+   FM.addons (written by src/capiche/addon_data.js) records the four baked "name …leader… price"
+   rows in the bottom-right of page 0 plus their measured geometry. The block is page furniture:
+   it sits below flowBottom, its leader rules are pinned by furnitureRuleYs(), and the dish
+   machinery never touches it. Everything here is REWRITE-ONLY — no baked block is ever deleted,
+   because the group shares inherited graphics state (the first price block sets the fill and the
+   0.05 Tc for every later row, and the GHASLET name block carries no Tf of its own), so deleting
+   any one block would re-style the ones after it. An emptied slot is a blanked string `()` and a
+   zero-length leader (a zero-length butt-cap stroke paints nothing); rows beyond the four baked
+   slots are appended as self-contained blocks that set their own state. */
+let addons=null;   // {rows:[{key,name,price,removed}], title:''}; stays null when FM has no addons
+function addonsInit(){
+  if(!FM.addons){ addons=null; return; }
+  addons={ rows: FM.addons.rows.map((r,i)=>({key:'b'+i, name:r.name.text, price:(FIELD[r.price_id]||{}).text||'', removed:false})), title:'' };
+}
+function addonsSnap(){ return addons? { rows: addons.rows.map(r=>({key:r.key, name:r.name, price:r.price, removed:!!r.removed})), title:addons.title||'' } : null; }
+/* The whole group inherits `0.05 Tc`, so a glyph really advances (0.63 + 0.05) em — proven by the
+   baked price right edges, which only align on one common edge (804.15) under that advance. The
+   0.63-only formula opsForPage uses for dish prices would drift these by 0.4pt per digit, which is
+   why addonOps owns the block's price splices and the ids are skipped there. */
+function addonAdv(){ return (0.63 + (FM.addons.tc||0)) * FM.addons.name_size; }
+function addonPriceAdv(){ return (0.63 + (FM.addons.tc||0)) * FM.addons.price_size; }
+function addonLive(){ return addons? addons.rows.filter(r=>!r.removed) : []; }
+function addonCapacity(){   // baked slots + appended rows that still clear the red strapline
+  const A=FM.addons; if(!A) return 0;
+  const lastY=A.rows[A.rows.length-1].y;
+  return A.rows.length + Math.max(0, Math.floor((lastY - A.floor_y - 2) / A.pitch));
+}
+function addonNameMax(priceText){   // chars that keep name + a minimum leader + price on one row
+  const A=FM.addons;
+  const priceLeft = A.right_edge - String(priceText||'').length*addonPriceAdv();
+  const room = priceLeft - A.leader_end_pad - 8 - A.leader_gap - A.x;   // 8pt leader minimum
+  return Math.max(0, Math.floor(room / addonAdv()));
+}
+/* ONE geometry function for baked and appended rows alike: the leader runs from the name's right
+   edge (plus the measured gap) to just left of the price's left edge. */
+function addonRowGeo(name, price){
+  const A=FM.addons;
+  const nameEnd = A.x + String(name||'').length*addonAdv();
+  const priceLeft = A.right_edge - String(price||'').length*addonPriceAdv();
+  const lx = nameEnd + A.leader_gap;
+  const llen = Math.max(0, priceLeft - A.leader_end_pad - lx);
+  return { nameEnd, priceLeft, lx, llen };
+}
+function addonOps(p){
+  const A=FM.addons;
+  if(!A || A.page!==p || !addons) return {ops:[], add:''};
+  const live=addonLive(), ops=[];
+  for(let i=0;i<A.rows.length;i++){
+    const slot=A.rows[i], pf=FIELD[slot.price_id];
+    const want=live[i]||null;
+    const name = want? want.name : '';
+    const price = want? want.price : '';
+    const sameName = name === slot.name.text;
+    const samePrice = price === (pf?pf.text:'');
+    if(sameName && samePrice) continue;                 // pristine slot: zero ops, byte-identical
+    if(!sameName) ops.push({s:slot.name.tj_span[0], e:slot.name.tj_span[1], rep:enc('('+escPdf(name)+')')});
+    if(!samePrice){
+      ops.push({s:pf.tj_span[0], e:pf.tj_span[1], rep:enc('('+escPdf(price)+')')});
+      const tv=pf.tm_vals, nx=A.right_edge - String(price).length*addonPriceAdv();
+      ops.push({s:pf.tm_span[0], e:pf.tm_span[1], rep:enc([tv[0],tv[1],tv[2],tv[3],nx,tv[5]].map(fmtNum).join(' '))});
+    }
+    // the leader follows both of its ends whenever either changed; an emptied slot's goes to zero
+    // (a row with no name AND no price is blank too, or it would draw one naked full-width line)
+    const blank = !want || (!name && !price);
+    const g=addonRowGeo(name, price), L=slot.leader;
+    ops.push({s:L.full_span[0], e:L.full_span[1],
+      rep:enc(!blank? 'q 1 0 0 1 '+fmtNum(g.lx)+' '+fmtNum(L.y)+' cm\n0 0 m\n'+fmtNum(g.llen)+' 0 l\nS\nQ'
+                    : 'q 1 0 0 1 '+fmtNum(L.x)+' '+fmtNum(L.y)+' cm\n0 0 m\n0 0 l\nS\nQ')});
+  }
+  // rows beyond the baked slots: appended, self-contained (explicit fill, page-local font, tracking)
+  let add='';
+  const F=pageFonts(p), NC='0.727 0.668 0.652 0.813';
+  const lastY=A.rows[A.rows.length-1].y, sz=PAGES[p]||[841.89,595.276];
+  for(let k=A.rows.length;k<live.length;k++){
+    const r=live[k], y=lastY - A.pitch*(k-A.rows.length+1);
+    if(!r.name && !r.price) continue;                    // an empty row prints nothing
+    if(y < A.floor_y + 2){ try{console.warn('addonOps: no room for add-on "'+r.name+'" below the block — skipped');}catch(_){ } continue; }
+    const g=addonRowGeo(r.name, r.price);
+    add += '\nBT\n'+NC+' k\n'+F.desc+' 1 Tf\n'+fmtNum(A.tc)+' Tc 0 Tw '+fmtNum(A.name_size)+' 0 0 '+fmtNum(A.name_size)+' '+fmtNum(A.x)+' '+fmtNum(y)+' Tm\n('+escPdf(r.name)+')Tj\nET';
+    if(r.price) add += '\nBT\n'+F.price+' 1 Tf\n'+fmtNum(A.tc)+' Tc -0.05 Tw '+fmtNum(A.price_size)+' 0 0 '+fmtNum(A.price_size)+' '+fmtNum(g.priceLeft)+' '+fmtNum(y+0.2)+' Tm\n('+escPdf(r.price)+')Tj\nET';
+    if(g.llen>0) add += '\nq\n0 '+jFmt(sz[1])+' '+jFmt(sz[0])+' '+jFmt(-sz[1])+' re\nW n\n'+NC+' K\n0.304 w \nq 1 0 0 1 '+fmtNum(g.lx)+' '+fmtNum(y-0.17)+' cm\n0 0 m\n'+fmtNum(g.llen)+' 0 l\nS\nQ\nQ';
+  }
+  /* optional printed heading above the first row. The artwork ships with NO heading here, so an
+     empty title emits nothing and the block stays byte-identical. nameRunPdf borrows the price
+     face for digits, exactly like a dish name. */
+  const title=(addons.title||'').trim();
+  if(title) add += '\nBT\n'+NC+' k\n'+F.name+' 1 Tf\n0 Tc 0 Tw 13 0 0 13 '+fmtNum(A.x)+' '+fmtNum(A.rows[0].y+18)+' Tm\n'+nameRunPdf(title.toUpperCase(), F)+'Tj\nET';
+  return {ops, add};
+}
 function jFmt(v){ let s=(+v).toFixed(4).replace(/0+$/,'').replace(/\.$/,''); return s||'0'; }
 function jEsc(s){ return normTypo(s).replace(/\\/g,'\\\\').replace(/\(/g,'\\(').replace(/\)/g,'\\)'); }
 function jStamp(parts, tx, ty){
@@ -1797,10 +1911,15 @@ function dividerOps(divs, removedSlots, growSlots, pinnedYs){
   // last-item over-estimate is harmless (nothing sits below the last item).
   const ops=[]; if(!((removedSlots&&removedSlots.length)||(growSlots&&growSlots.length))) return ops;
   removedSlots=removedSlots||[];
+  const _pin=pinnedYs||[];
+  const _pinned=y=>_pin.some(v=>Math.abs(y-v)<1.5);
   const killed=new Set();
   const slots=[...removedSlots].sort((a,b)=>b.y-a.y);
   for(const rs of slots){
-    const inCol=o=> o.d.x>=rs.cmin && o.d.x<rs.cmax;
+    // pinned leader rules (the ADD-ONS footer list) are page furniture: they must not be
+    // consumable as a removed dish's divider either, or removing the column's last dish
+    // eats a leader while addonOps still owns (and rewrites) the same span
+    const inCol=o=> o.d.x>=rs.cmin && o.d.x<rs.cmax && !_pinned(o.d.y);
     const colDivs=divs.map((d,i)=>({d,i})).filter(inCol).sort((a,b)=>b.d.y-a.d.y);
     let gaps=[]; for(let k=1;k<colDivs.length;k++) gaps.push(colDivs[k-1].d.y-colDivs[k].d.y);
     let pitch; if(gaps.length){ gaps.sort((a,b)=>a-b); pitch=gaps[gaps.length>>1]; }
@@ -1812,10 +1931,9 @@ function dividerOps(divs, removedSlots, growSlots, pinnedYs){
     if(!pick) pick=colDivs.find(o=>!killed.has(o.i) && o.d.y<rs.y-1 && o.d.y>=rs.y-G);
     if(pick) killed.add(pick.i);
   }
-  const _pin=pinnedYs||[];
   divs.forEach((d,i)=>{
     if(killed.has(i)){ ops.push({s:d.full[0], e:d.full[1], rep:enc('')}); return; }
-    if(_pin.some(y=>Math.abs(d.y-y)<1.5)) return;      // a footer leader rule: page furniture
+    if(_pinned(d.y)) return;                           // a footer leader rule: page furniture
     let shift=0;
     for(const rs of removedSlots){
       if(!(d.x>=rs.cmin && d.x<rs.cmax)) continue;
@@ -1903,6 +2021,8 @@ async function regenerate(){
       const grp=itemsForPage(p);
       for(const it of grp.items){ if(removed.has(it.name.id)){ skip.add(it.name.id); if(it.desc)skip.add(it.desc.id); for(const pr of it.prices)skip.add(pr.id);} }
     }
+    // the ADD-ONS block owns its price splices (its advance model differs — see addonOps)
+    if(FM.addons && FM.addons.page===p && addons) for(const r of FM.addons.rows) skip.add(r.price_id);
     const divs = _dividerLines(ps.pristine);
     const bdg = badgeOps(ps.pristine, p, st.removedSlots, st.growSlots);   // NEW badges decoupled like dividers
     // marker overrides: delete edited dishes' baked markers + restamp their chosen set at the anchor
@@ -1981,6 +2101,11 @@ async function regenerate(){
     const inDiv = (s,e)=> divs.some(d=> d.full[0]<=s && e<=d.full[1]);
     const shiftOps = st.shiftOps.filter(o=> !inDiv(o.s,o.e) && !inBadge(o.s,o.e) && !inMarker(o.s,o.e));   // divider/badge/marker cms handled by own-Y, not block-shift
     let ops = opsForPage(FM.fields.filter(f=>f.page===p), st.priceShift, skip, st.fieldShift).concat(shiftOps, mkMoveOps);
+    /* ADD-ONS rewrites. Safe to join the shared ops list: every span is recorded in FM.addons,
+       the block sits below flowBottom (no shiftOps land there), its leader rules are pinned by
+       furnitureRuleYs (dividerOps skips them), and no dish owns its runs (no deletes reach it). */
+    const ao = addonOps(p);
+    for(const o of ao.ops) ops.push(o);
     // carve divider AND badge spans out of block-deletes so bundled ones are never collaterally deleted.
     // A removed dish's own NEW badge is a case where this now runs the OTHER way: the per-icon leaf
     // block for its badge (from `blocks`, small) can fall entirely INSIDE the badge span `_badges()`
@@ -2033,7 +2158,7 @@ async function regenerate(){
     const pc=personaCover(p);   // personalised cover: hide any `del` spans, stamp occasion + guest
     for(const sp of pc.del){ ops.push({s:sp[0],e:sp[1],rep:enc(safeDel(p,sp[0],sp[1],keepFont(sp,p)))}); }
     let edited = ops.length ? spliceBytes(ps.pristine, ops) : ps.pristine;
-    const addStr = appendedForPage(p, st.removedSlots, st.growSlots) + mkAppend + pc.add;
+    const addStr = appendedForPage(p, st.removedSlots, st.growSlots) + mkAppend + pc.add + ao.add;
     if(addStr){ const ab=enc(addStr); const m=new Uint8Array(edited.length+ab.length); m.set(edited,0); m.set(ab,edited.length); edited=m; }
     ps.dict.set(PDFName.of('Length'), PDFNumber.of(edited.length));
     doc.context.assign(ps.ref, PDFRawStream.of(ps.dict, edited));
@@ -2333,6 +2458,73 @@ function renderAddZone(ed){
   };
 }
 
+/* ---------- ADD-ONS panel: the page-0 footer price list, fully editable ---------- */
+function addonBadChars(s, allowed){ const seen={}, r=[]; for(const c of String(s||'').toUpperCase()){ if(allowed.indexOf(c)===-1 && !seen[c]){ seen[c]=1; r.push(c); } } return r; }
+function renderAddonsPanel(ed){
+  const A=FM.addons;
+  const eh=document.createElement('div'); eh.className='grouphd'; eh.textContent='Add-ons';
+  ed.appendChild(eh);
+  const card=document.createElement('div'); card.className='card';
+  const note=document.createElement('div'); note.className='adnote';
+  const syncNote=()=>{
+    // an added DISH in the right column lands in this same footer space (sections[].gap_below
+    // predates the block) — warn rather than block, and let the preview arbitrate
+    const clash = added.some(a=>{ const s=SECTIONS[a.sec]; return s && s.page===A.page && Math.abs(s.col_x-A.x)<5; })
+                  && (((addons.title||'').trim()) || addonLive().length>A.rows.length);
+    note.textContent = clash
+      ? 'Heads up: a dish added to the right column shares this space — check the preview for overlap.'
+      : 'The red “ON THE HOUSE” line below this list is part of the artwork and can’t be edited yet.';
+    note.classList.toggle('warn', clash);
+  };
+  // optional printed heading (the artwork ships without one; blank prints nothing)
+  const hrow=document.createElement('div'); hrow.className='adhead';
+  const hl=document.createElement('span'); hl.className='lbl'; hl.textContent='Heading';
+  const hin=document.createElement('input'); hin.className='adn'; hin.placeholder='optional — e.g. ADD ONS (printed above the list)'; hin.value=addons.title||'';
+  const hval=()=>{ const t=addons.title||'', bad=addonBadChars(t, ALLOWED.name), over=t.length>31;
+    hin.classList.toggle('err', !!bad.length); hin.classList.toggle('over', !bad.length&&over);
+    hin.title=bad.length? 'Not in the menu font: '+bad.join(' ') : over? 'Too long — up to 31 characters fit' : ''; };
+  hin.addEventListener('input', ()=>{ addons.title=normTypo(hin.value).toUpperCase(); hval(); syncNote(); updateGate(); schedulePreview(); });
+  hrow.appendChild(hl); hrow.appendChild(hin); card.appendChild(hrow); hval();
+  addons.rows.forEach((r, idx)=>{
+    if(r.removed){
+      const strip=document.createElement('div'); strip.className='rmstrip';
+      const nm=document.createElement('span'); nm.className='rmname'; nm.textContent=r.name||'(empty add-on)';
+      const tag=document.createElement('span'); tag.className='rmtag'; tag.textContent='removed';
+      const rb=document.createElement('button'); rb.className='restore'; rb.type='button'; rb.textContent='Restore';
+      rb.addEventListener('click',()=>{ r.removed=false; buildEditor(); schedulePreview(); });
+      strip.appendChild(nm); strip.appendChild(tag); strip.appendChild(rb); card.appendChild(strip);
+      return;
+    }
+    const row=document.createElement('div'); row.className='adnrow';
+    const nin=document.createElement('input'); nin.className='adn'; nin.placeholder='name'; nin.value=r.name;
+    const pin=document.createElement('input'); pin.className='price'; pin.placeholder='price'; pin.value=r.price; pin.inputMode='numeric';
+    const val=()=>{ const nb=addonBadChars(r.name, ALLOWED.desc), pb=addonBadChars(r.price, ALLOWED.price);
+      const max=addonNameMax(r.price), over=r.name.length>max;
+      nin.classList.toggle('err', !!nb.length); nin.classList.toggle('over', !nb.length&&over);
+      nin.title=nb.length? 'Not in the menu font: '+nb.join(' ') : over? 'Too long — up to '+max+' characters fit beside this price' : '';
+      pin.classList.toggle('err', !!pb.length); pin.title=pb.length? 'Not printable in the price font: '+pb.join(' ') : ''; };
+    nin.addEventListener('input', ()=>{ r.name=normTypo(nin.value).toUpperCase(); val(); updateGate(); schedulePreview(); });
+    pin.addEventListener('input', ()=>{ r.price=normTypo(pin.value).trim(); val(); updateGate(); schedulePreview(); });
+    const up=document.createElement('button'); up.type='button'; up.className='admv'; up.textContent='↑'; up.title='Move up'; up.disabled=idx===0;
+    up.addEventListener('click',()=>{ const t=addons.rows[idx-1]; addons.rows[idx-1]=addons.rows[idx]; addons.rows[idx]=t; buildEditor(); schedulePreview(); });
+    const dn=document.createElement('button'); dn.type='button'; dn.className='admv'; dn.textContent='↓'; dn.title='Move down'; dn.disabled=idx===addons.rows.length-1;
+    dn.addEventListener('click',()=>{ const t=addons.rows[idx+1]; addons.rows[idx+1]=addons.rows[idx]; addons.rows[idx]=t; buildEditor(); schedulePreview(); });
+    const rm=document.createElement('button'); rm.type='button'; rm.className='rm'; rm.title='Remove this add-on'; rm.textContent='✕';
+    rm.addEventListener('click',()=>{ r.removed=true; buildEditor(); schedulePreview(); });
+    row.appendChild(nin); row.appendChild(pin); row.appendChild(up); row.appendChild(dn); row.appendChild(rm);
+    card.appendChild(row); val();
+  });
+  const addB=document.createElement('button'); addB.type='button'; addB.className='adadd';
+  const cap=addonCapacity(), liveN=addonLive().length;
+  addB.textContent='+ Add add-on'; addB.disabled=liveN>=cap;
+  addB.title=liveN>=cap? 'No room — the list may hold up to '+cap+' rows before the red line' : '';
+  addB.addEventListener('click',()=>{ if(addonLive().length>=addonCapacity()) return;
+    addons.rows.push({key:'n'+(++_adSeq), name:'', price:'', removed:false}); buildEditor();
+    const inputs=ed.querySelectorAll('.adnrow .adn'); if(inputs.length) inputs[inputs.length-1].focus(); });
+  card.appendChild(addB); card.appendChild(note); syncNote();
+  ed.appendChild(card);
+}
+let _adSeq=0;
 function buildEditor(){
   const ed=document.getElementById('editor'); ed.innerHTML="";
   const {items,extras}=itemsForPage(activePage);
@@ -2444,9 +2636,12 @@ function buildEditor(){
     ed.appendChild(card);
     highlightField(name); if(it.desc){ highlightField(card.querySelector('.desc')); updateCtr(card.querySelector('.desc')); }
   }
-  if(extras.length){ const eh=document.createElement('div'); eh.className='grouphd'; eh.textContent='Other prices'; ed.appendChild(eh);
+  const _adIds = (FM.addons && addons) ? new Set(FM.addons.rows.map(r=>r.price_id)) : new Set();
+  if(FM.addons && addons && FM.addons.page===activePage) renderAddonsPanel(ed);
+  const looseExtras = extras.filter(x=>!_adIds.has(x.id));
+  if(looseExtras.length){ const eh=document.createElement('div'); eh.className='grouphd'; eh.textContent='Other prices'; ed.appendChild(eh);
     const card=document.createElement('div'); card.className='card'; const pr=document.createElement('div'); pr.className='prices';
-    for(const p of extras){ const w=document.createElement('div'); w.className='pwrap'; const inp=document.createElement('input'); inp.className='price'; inp.dataset.id=p.id; inp.dataset.orig=p.text; inp.value=(p.id in edits)?edits[p.id]:p.text; inp.inputMode='numeric'; w.appendChild(inp); pr.appendChild(w); }
+    for(const p of looseExtras){ const w=document.createElement('div'); w.className='pwrap'; const inp=document.createElement('input'); inp.className='price'; inp.dataset.id=p.id; inp.dataset.orig=p.text; inp.value=(p.id in edits)?edits[p.id]:p.text; inp.inputMode='numeric'; w.appendChild(inp); pr.appendChild(w); }
     card.appendChild(pr); ed.appendChild(card);
   }
   updateGate();
@@ -2545,6 +2740,9 @@ function updateGate(){
   document.querySelectorAll('.name,.desc').forEach(el=>{ const n=el.querySelectorAll('.sp').length; if(!n) return; if(el.dataset.id in edits) sp+=n; else spBase+=n; });
   document.querySelectorAll('.name .gl,.desc .gl').forEach(()=>gl++);
   document.querySelectorAll('.price.err').forEach(()=>pe++);
+  // ADD-ONS panel inputs: unprintable characters block like a font error, over-length like overflow
+  document.querySelectorAll('.adn.err').forEach(()=>gl++);
+  document.querySelectorAll('.adn.over').forEach(()=>ov++);
   document.querySelectorAll('.card').forEach(c=>{
     const g=c.querySelector('.gl'),s=c.querySelector('.sp'),h=c.querySelector('.hint'); if(!h) return;
     let over=false;
@@ -2644,8 +2842,16 @@ document.getElementById('persona').addEventListener('click', openPersona);
 // ---- edit-memory glue (capiche) ----
 const MEM_BRAND='capiche';
 let memBaseVer='';
-function memSnapshot(){ return { edits:{...edits}, removed:[...removed], added, markerEdits, persona:{...persona} }; }
-function memApply(st){ for(const k in edits) delete edits[k]; Object.assign(edits, st.edits||{}); removed=new Set(st.removed||[]); added=st.added||[]; markerEdits=st.markerEdits||{}; persona=Object.assign({occasion:'',guest:''}, st.persona||{}); }
+function memSnapshot(){ return { edits:{...edits}, removed:[...removed], added, markerEdits, persona:{...persona}, addons: addonsSnap() }; }
+function memApply(st){ for(const k in edits) delete edits[k]; Object.assign(edits, st.edits||{}); removed=new Set(st.removed||[]); added=st.added||[]; markerEdits=st.markerEdits||{}; persona=Object.assign({occasion:'',guest:''}, st.persona||{});
+  if(addons){
+    if(st.addons && st.addons.rows){ addons.rows=st.addons.rows.map(r=>({key:r.key, name:r.name, price:r.price, removed:!!r.removed})); addons.title=st.addons.title||''; }
+    else addonsInit();
+    /* legacy snapshots (before the ADD-ONS panel) carried these prices as plain edits; the ids are
+       now skipped in opsForPage, so fold a saved edit into the matching row or it silently vanishes */
+    FM.addons.rows.forEach((sr,i)=>{ if(sr.price_id in edits){ const br=addons.rows.find(r=>r.key==='b'+i); if(br) br.price=edits[sr.price_id]; delete edits[sr.price_id]; } });
+  }
+}
 function memRebuild(){ buildEditor(); regenerate().then(renderPreview); }
 // ============ EDIT MEMORY — autosave + resume + version history (per brand) ============
 // Glue each editor must define BEFORE this block:
@@ -2765,6 +2971,7 @@ async function boot(){
     }
     readRunTracking();            // per-field Tc, needed by every name width calculation
     adoptStrayMarkers();          // must run before buildEditor(): it changes what the chips show
+    addonsInit();                 // ADD-ONS footer list state, from FM.addons (no-op if absent)
     buildEditor(); try{MEM.init();}catch(e){console.error(e);}
     await regenerate(); await renderPreview();
     document.getElementById('boot').style.display='none';
