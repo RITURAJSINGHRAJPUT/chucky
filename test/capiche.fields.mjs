@@ -225,8 +225,13 @@ section(`4. PRICES — ${prices.length} fields x variants (L3)`);
     const warns = E.takeWarnings().filter(w => /spliceBytes/.test(w));
     await structural(`price "${val}"`, pdf, warns);
     let missing = [];
+    // the four ADD-ONS prices are owned by addonOps and right-align to FM.addons.right_edge with
+    // the Tc-inclusive advance, so their LEFT edge moves with the value's length ("120/400" -> "9"
+    // shifts it 32.6pt right). Expect the right-aligned position for those; the baked x otherwise.
+    const AD = FM.addons, adIds = new Set(AD ? AD.rows.map(r => r.price_id) : []);
     for (const f of prices) {
-      const near = textLines(pdf, f.page).filter(l => Math.abs(l.bot - f.y) < 5 && Math.abs(l.x0 - f.x) < 30);
+      const expX = adIds.has(f.id) ? AD.right_edge - val.length * (0.63 + (AD.tc || 0)) * f.size : f.x;
+      const near = textLines(pdf, f.page).filter(l => Math.abs(l.bot - f.y) < 5 && Math.abs(l.x0 - expX) < 30);
       if (!near.some(l => l.text.replace(/\s/g, '').includes(val))) missing.push(f.id);
     }
     rec(`price "${val}": every price renders`, !missing.length,
