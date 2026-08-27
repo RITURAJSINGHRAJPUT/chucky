@@ -1301,7 +1301,15 @@ function addonRowGeo(name, price){
 function addonOps(p){
   const A=FM.addons;
   if(!A || A.page!==p || !addons) return {ops:[], add:''};
-  const live=addonLive(), ops=[];
+  /* Legacy/harness compatibility: an `edits[<price_id>]` entry (the pre-panel way these four
+     prices were edited — foodh.js EDITS and old autosaves still speak it) overrides the ROW that
+     owns that baked price. opsForPage skips the ids, so this is the only reader. */
+  const live=addonLive().map(r=>{
+    const m=/^b(\d+)$/.exec(r.key);
+    if(m && A.rows[+m[1]] && (A.rows[+m[1]].price_id in edits)) return Object.assign({}, r, {price: edits[A.rows[+m[1]].price_id]});
+    return r;
+  });
+  const ops=[];
   for(let i=0;i<A.rows.length;i++){
     const slot=A.rows[i], pf=FIELD[slot.price_id];
     const want=live[i]||null;

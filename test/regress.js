@@ -471,7 +471,8 @@ const EDITORS = [
   // `npm test` is the single gate.
   for (const [name, script] of [['bug API input clamps', 'test/bugapi.test.mjs'],
                                 ['/bugs/ dashboard neutralises hostile records', 'test/bugsdash.test.mjs'],
-                                ['capiche: ADD-ONS block fully editable', 'test/capiche.addons.mjs']]) {
+                                ['capiche: ADD-ONS block fully editable', 'test/capiche.addons.mjs'],
+                                ['cross-promo QRs + capiche FSSAI licence line', 'test/crosspromo.mjs']]) {
     await guard(name, async () => {
       try { const o = run(script, []); const m = /(\d+) passed, (\d+) failed/.exec(o);
             return [m && m[2] === '0', m ? `${m[1]} passed, ${m[2]} failed` : 'no summary line']; }
