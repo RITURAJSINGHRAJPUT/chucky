@@ -23,3 +23,6 @@ deploy/.wrangler/
 
 # test artefacts (renders, exported PDFs, fixtures)
 test-output/
+.vercel
+.env*
+key.txt
