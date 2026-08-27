@@ -8,16 +8,20 @@
     "dev": "cd deploy && wrangler dev",
     "dev:lan": "cd deploy && wrangler dev --ip 0.0.0.0 --port 8787",
     "netlify:dev": "netlify dev",
+    "vercel:dev": "vercel dev",
     "food:build": "node src/capiche/build_food.js",
     "test:food": "node foodh.js",
     "test:markers": "node markerh.js",
     "test:frame": "node framh.js",
     "test": "node test/regress.js",
     "test:churnd": "node churndh.js",
-    "test:drinks": "node src/drinks/harness_bands.js"
+    "test:drinks": "node src/drinks/harness_bands.js",
+    "test:bugapi": "node test/bugapi.test.mjs",
+    "test:menustate": "node test/menustate.test.mjs"
   },
   "dependencies": {
     "@netlify/blobs": "^8.1.0",
+    "@upstash/redis": "^1.34.0",
     "jsdom": "^29.1.1",
     "pdf-lib": "^1.17.1"
   },

@@ -17,7 +17,18 @@ Aiko and Capiche). Restaurant staff open an editor in the browser, change dish n
 prices / allergen markers / photos, and **export a print-ready PDF that is the real designed menu
 with surgical edits** — not an HTML re-creation.
 
+Every editor also has a **Publish** button (next to Export): unlike Export, which downloads a PDF
+for the person clicking it, Publish pushes the current edit-state to a small server-side store
+(`/api/menu-state/:editor`) so *any device* that opens that editor afterward loads the last-published
+state instead of always starting from the pristine baseline — it persists until the next Publish.
+The baseline PDF/`fieldmap.json` are never modified by this; it's purely the same JSON edit-overlay
+(`edits`/`removed`/`added`/marker state) that already drives `regenerate()`, now with a permanent
+home instead of only `localStorage`. Gated by its own `PUBLISH_KEY` (separate from `BUG_KEY` — see
+§7b). See `api/menu-state/[editor].mjs` and the `MEM_BRAND`-adjacent "Publish" block in each editor.
+
 **Live (Cloudflare Worker):** https://bookends-chucky.capichesecretmenu.workers.dev
+(A parallel Vercel deploy target also exists for maintainers without Cloudflare access — §1c/§7b.
+Cloudflare remains the documented, primary host; Vercel is not a cutover.)
 
 | Path | Editor |
 |------|--------|
@@ -49,7 +60,15 @@ account. The owner invites the new maintainer to that account so the live URLs a
   # then GitHub → repo → Settings → Collaborators → Add (Write access)
   ```
 - Or simply hand them the zip and let them host it. Either way, **keep it private** — it contains the
-  restaurant's menu PDFs and the `BUG_KEY` value (see §7).
+  restaurant's menu PDFs and the `BUG_KEY`/`PUBLISH_KEY` values (see §7, §7b).
+
+**c) No Cloudflare access? Deploy to your own Vercel account instead.** A maintainer who isn't
+invited to the Cloudflare account (§1a) can still run their own copy — Vercel needs no permission
+from anyone else, since it's a project under *your* account. This is a parallel target, not a
+replacement: it serves the same static `deploy/public/` plus a Vercel-native port of the bug-report
+API and the Publish feature (`api/`, `vercel.json`). See §7b for setup and what's still needed
+(an Upstash Redis integration for storage; `BUG_KEY`/`PUBLISH_KEY` as Vercel env vars instead of
+Wrangler secrets).
 
 ---
 
@@ -173,6 +192,12 @@ already in the repo are enough to *edit* today):
 
 ```
 CLAUDE.md                # this guide
+vercel.json              # Vercel: outputDirectory=deploy/public, no-cache headers (§7b)
+api/                     # Vercel-only: bug-report API port + the Publish (menu-state) API
+  lib/kv.mjs             # Upstash Redis client wrapper
+  lib/bugstore.mjs       # Vercel's own copy of the clamp/CORS/auth helpers (3rd copy — see below)
+  bug.mjs bugs.mjs bug/[id].mjs        # POST /api/bug, GET /api/bugs, POST|PATCH /api/bug/:id
+  menu-state/[editor].mjs              # GET/POST /api/menu-state/:editor — the Publish feature
 deploy/
   wrangler.jsonc         # Worker: name=bookends-chucky, ASSETS=./public, KV BUGS (BUG_KEY is a
                          #   secret, NOT in this file)
@@ -184,14 +209,27 @@ deploy/
     drinks/ capiche-surat/ capiche-ahm/   # DRINKS editors
     bugs/index.html                 # bug-queue dashboard
     menu/index.html                 # customer-facing page
+netlify/                 # parallel Netlify port of the bug-report API (never promoted to primary —
+                         #   see docs/knowledge/chucky-current-state.md §5)
 src/
   capiche/build_food.js  # FOOD fieldmap builder (Node + pdf-lib)
   capdrinks/*.py         # DRINKS build pipeline (Python + pikepdf) + RobotoMono-SemiBold.ttf
   drinks/  shared/       # Aiko-drinks builder/harnesses; shared memory.js + report.js
-foodh.js markerh.js framh.js foodh_ar.js   # test harnesses
+foodh.js markerh.js framh.js foodh_ar.js churndh.js        # test harnesses
+test/bugapi.test.mjs     # drift-guard: Worker/Netlify/Vercel bug-API clamps must agree (3-way)
+test/menustate.test.mjs  # Publish API: allowlist, gating, payload clamps
 docs/knowledge/          # detailed engineering notes (READ when touching a tricky area)
 backups/                 # timestamped safety copies   incoming/  # latest raw blueprint PDF
 ```
+
+**Why `api/lib/bugstore.mjs` is a third copy, not a shared import:** `netlify/lib/bugstore.mjs`
+already established this pattern — its own header comment says its constants "mirror
+`deploy/worker.js` EXACTLY... the two deployments must not drift, or one host stores what the
+other rejects," enforced by `test/bugapi.test.mjs` rather than by extraction. A shared module
+would need to work unmodified inside three different runtimes' module resolution (Cloudflare
+Worker isolate, Netlify Function, Vercel Edge Function) for ~40 lines of pure functions — not
+worth the coupling. If you change a clamp/limit in one copy, change it in all three and rerun
+`node test/bugapi.test.mjs`.
 
 Deep reference in **`docs/knowledge/`** (with its own index README): the whole-system notes, the food
 rebuild method, drinks pipeline, the `keepFont()` fontless-inherit bug, reflow pitch, marker
@@ -224,3 +262,48 @@ new id in `wrangler.jsonc`, change the Worker `name`, set your own `BUG_KEY`, de
 **Open item:** the in-editor bug capture + `/bugs/` dashboard are live; an **autonomous daily
 bug-fixer** was scoped but left pending an authorization-model decision
 (`docs/knowledge/bug-report-loop.md`). Pick up there to close the loop.
+
+---
+
+## 7b. Vercel (parallel option — build vs. what's still yours to do)
+
+**What's built and verified** (against a local stand-in for `vercel dev` — no live Vercel/Upstash
+account was available while building this, so the storage leg below is unverified against the
+*real* Upstash REST API specifically, only against a hand-rolled mock of its wire protocol; treat
+the first real deploy as the actual first test of that leg):
+- `vercel.json` — static output (`deploy/public`, zero build step) + the same no-cache header rule
+  `netlify.toml` uses for `index.html`.
+- `api/` — Edge Functions (`runtime:'edge'`, Web-standard `Request`/`Response`, same signature as
+  the Worker and Netlify Function) porting the 3 bug-report routes, plus the new
+  `GET/POST /api/menu-state/:editor` Publish routes. Storage: Upstash Redis via
+  `@upstash/redis` (REST-based, so Edge-compatible) — see `api/lib/kv.mjs`.
+- The **Publish** feature itself, wired into all 6 editors (boot-time fetch-and-apply before
+  `buildEditor()`, a `#publish` button next to `#export`, `PUBLISH_KEY` gating reusing the
+  bug-dashboard's `askKey()`/`localStorage` pattern under a separate key). Two Editors
+  (`capiche-surat`, `capiche-ahm`) carry uploaded photos in browser IndexedDB, never in the JSON
+  state — Publish ships crop metadata only; a **fresh device won't have the photo pixels** for
+  someone else's upload until it uploads its own. This is a known, accepted limitation, not a bug.
+
+**What you still need to do** (needs your own Vercel account — not something that can be done from
+this repo alone):
+1. `vercel link` (or import the repo via the Vercel dashboard) — Root Directory stays the repo
+   root (`api/` and `vercel.json`'s `outputDirectory` both resolve from there; see the comment at
+   the top of `vercel.json` if you move anything).
+2. **Storage → Marketplace → Upstash** (Redis) integration. The exact env var names it injects can
+   vary (`KV_REST_API_URL`/`KV_REST_API_TOKEN` vs `UPSTASH_REDIS_REST_URL`/`UPSTASH_REDIS_REST_TOKEN`)
+   — `api/lib/kv.mjs` reads both pairs, so whichever the dashboard sets just works; no code change
+   needed unless the integration uses different names entirely.
+3. Set **`BUG_KEY`** and **`PUBLISH_KEY`** as Vercel Environment Variables (Project Settings →
+   Environment Variables) — plain env vars here, not Wrangler secrets. Pick a fresh `PUBLISH_KEY`;
+   it's not the same value as `BUG_KEY` (see the "why separate" note above the Publish description
+   at the top of this file) and isn't recoverable from anywhere in this repo.
+4. Deploy (`vercel --prod`, or connect the GitHub repo for auto-deploy on push).
+5. **First deploy only**, verify the one thing that couldn't be checked from this environment:
+   open `/capiche/` (or any editor) on the new URL and confirm it boots — this is the
+   directory-index resolution (`/capiche/` → `deploy/public/capiche/index.html`) that every other
+   host already does the same way, but wasn't confirmed against real Vercel infra. Then verify one
+   full Publish round-trip: edit a name, click Publish, open the same editor in a private window,
+   confirm the edit is there.
+6. Run `node test/bugapi.test.mjs` and `node test/menustate.test.mjs` after any change to
+   `api/lib/bugstore.mjs` or the clamp constants — they must keep agreeing with the Worker and
+   Netlify copies (see the repo-map note above).

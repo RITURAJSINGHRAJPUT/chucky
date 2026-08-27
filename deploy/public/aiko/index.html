@@ -92,6 +92,9 @@ header.bar{display:flex;align-items:center;gap:16px;padding:10px 18px;border-bot
 #export{background:var(--aiko);color:#1a1400;font-weight:700;letter-spacing:.03em;padding:9px 16px;border-radius:9px;font-size:13px;transition:.15s}
 #export:hover{filter:brightness(1.07);transform:translateY(-1px)}
 #export:disabled{opacity:.4;cursor:not-allowed;transform:none;filter:none}
+#publish{background:var(--ok);color:#0d2013;font-weight:700;letter-spacing:.03em;padding:9px 16px;border-radius:9px;font-size:13px;transition:.15s}
+#publish:hover{filter:brightness(1.07);transform:translateY(-1px)}
+#publish:disabled{opacity:.4;cursor:not-allowed;transform:none;filter:none}
 .prevtoggle{display:none;align-items:center;gap:7px;font-size:12.5px;color:var(--cream-dim);border:1px solid var(--line2);border-radius:9px;padding:8px 13px}
 .prevtoggle:hover{border-color:var(--aiko-line);color:var(--cream)}
 
@@ -241,6 +244,7 @@ main.app{display:grid;grid-template-columns:210px 1fr minmax(400px,560px);height
   <button id="persona" title="Add an occasion + guest name to the cover">✨ Personalise</button>
   <button id="fullprev" title="Open the current menu full-size in a new tab">Full Preview ↗</button>
   <button id="export">Export PDF</button>
+  <button id="publish" title="Push the current menu live for everyone">Publish</button>
 </header>
 <main class="app">
   <nav class="rail" id="rail">
@@ -2261,6 +2265,36 @@ document.getElementById('export').addEventListener('click', async ()=>{
   try{MEM.snapshot('export');}catch(_){}
   showChucky(BRAND.download);
 });
+// ---- Publish: push the current edit-state live for everyone (see api/menu-state/[editor].mjs) ----
+// Separate from Export: Export downloads a print-ready PDF for THIS person; Publish makes what's
+// on screen the state every device's boot() loads from now on. Gated by its own PUBLISH_KEY (not
+// BUG_KEY) — reuses the bug-dashboard's key-prompt/localStorage pattern (deploy/public/bugs/index.html).
+function askPublishKey(cur){ const k=prompt('Enter the publish key (PUBLISH_KEY):', cur||''); if(!k) return cur||''; const v=k.trim(); try{localStorage.setItem('chucky_publishkey',v);}catch(_){} return v; }
+(function(){
+  const btn=document.getElementById('publish'); if(!btn) return;
+  btn.addEventListener('click', async()=>{
+    let key=''; try{key=localStorage.getItem('chucky_publishkey')||'';}catch(_){}
+    if(!key) key=askPublishKey(key);
+    if(!key) return;   // user cancelled the prompt — nothing to do
+    const label=btn.textContent; btn.disabled=true; btn.textContent='Publishing…';
+    // MEM's own autosave status chip shares this element and can re-fire on its own ~500ms
+    // debounce around the same moment and overwrite this text — flash it twice, the second time
+    // past that window, so the confirmation reliably wins the race instead of silently losing it.
+    const flash=(txt)=>{ const el=document.getElementById('memstat'); if(!el) return;
+      const t=el.querySelector('.memtxt'); if(t) t.textContent=txt; el.dataset.state='ok'; el.style.display=''; };
+    try{
+      await regenerate();   // safety gate: refuse to publish a state that doesn't even export cleanly
+      let res=await fetch('/api/menu-state/'+MEM_BRAND+'?k='+encodeURIComponent(key), {
+        method:'POST', body:JSON.stringify({state:memSnapshot(), base:memBaseVer}) });
+      if(res.status===403){ key=askPublishKey(key); if(!key){ btn.disabled=false; btn.textContent=label; return; }
+        res=await fetch('/api/menu-state/'+MEM_BRAND+'?k='+encodeURIComponent(key), {
+          method:'POST', body:JSON.stringify({state:memSnapshot(), base:memBaseVer}) }); }
+      if(!res.ok){ alert('Could not publish (server said '+res.status+').'); }
+      else{ flash('Published'); setTimeout(()=>flash('Published'), 700); }
+    }catch(e){ alert('Could not publish: '+((e&&e.message)||e)); }
+    finally{ btn.disabled=false; btn.textContent=label; }
+  });
+})();
 // ---------- PERSONALISE COVER: occasion + guest name (replaces the intro), then Export/Share ----------
 const OCCASIONS=[['','—'],['WELCOME','Welcome'],['HAPPY BIRTHDAY','Birthday'],['HAPPY ANNIVERSARY','Anniversary'],
   ['CONGRATULATIONS','Congratulations'],["LET'S CELEBRATE","Let's Celebrate"],['__custom','Custom message…']];
@@ -2486,6 +2520,14 @@ async function boot(){
       const stream=doc.context.lookup(ref);
       pageStreams.push({ref, dict:stream.dict, pristine:stream.contents.slice()});
     }
+    // Publish: load the last-published edit-state (if any) before running the pre-steps below or
+    // building the UI, so any device opening this editor sees the last-published menu rather than
+    // always the pristine baseline. Never blocks boot: a down/slow API, or nothing ever published,
+    // just leaves the pristine baseline in place exactly as before this feature existed.
+    try{
+      const r=await fetch('/api/menu-state/'+MEM_BRAND, {signal:AbortSignal.timeout(4000)});
+      if(r.ok){ const j=await r.json(); if(j&&j.state) memApply(j.state); }
+    }catch(_){ /* no publish yet, or the API is unreachable — pristine baseline stands */ }
     readRunTracking();           // per-field Tc/Tw, needed by every name width calculation
     adoptBakedBadges();          // before buildEditor(): it changes what the marker chips show
     buildEditor(); try{MEM.init();}catch(e){console.error(e);}
