@@ -121,19 +121,19 @@ const JOBS = [
        in the zone (glyph-outline cm groups + the 3 Tm) = text. */
     /* With no licence line, the three text lines stay at their ORIGINAL artwork position
        (17.3-58.3, no shift). Stack: कपीश (+82.1 -> 141.1-187.6), 8.5pt gap, QR (74.6-132.6),
-       "SCAN FOR FSSAI LICENCE" caption right under it (baseline 66.8), 8.5pt gap, text. */
+       "SCAN FOR FSSAI LICENSE" caption right under it (baseline 66.8), 8.5pt gap, text. */
     shifts: [
       { dy: 82.1, zone: { x0: 595, x1: 830, y0: 58.5, y1: 112 }, types: ['cm'], expect: 5 },  // कपीश glyphs
     ],
     qrAt: { x0: 739.86, y0: 74.6, w: 58 },   // centred on the caption axis (caption 727.72-810, centre 768.86)
-    caption: { text: 'SCAN FOR FSSAI LICENCE', fontRole: 'desc', size: 5.5, y: 66.8, rx: 810,
+    caption: { text: 'SCAN FOR FSSAI LICENSE', fontRole: 'desc', size: 5.5, y: 66.8, rx: 810,
                color: '0.727 0.668 0.652 0.813 k', tc: '0.05 Tc 0 Tw', adv_em: 0.68 },
   },
   {
     brand: 'aiko', dir: 'deploy/public/aiko', pdf: 'aiko.pdf', page: 1,
     shifts: [{ dy: 58, zone: { x0: 20, x1: 240, y0: 95, y1: 125 }, expect: 17 }],  // DAIRY/GLUTEN/SESAME/JAIN legend
     qrAt: { x0: 34.5, y0: 96, w: 58 },   // centred on the caption axis (caption 28-99.03, centre 63.5)
-    caption: { text: 'Scan for FSSAI licence', fontRole: 'desc', size: 5.5, y: 88.2, x: 28,
+    caption: { text: 'Scan for FSSAI license', fontRole: 'desc', size: 5.5, y: 88.2, x: 28,
                color: '0 g', tc: '0 Tc 0 Tw', adv_em: 0.587 },
   },
 ];
@@ -172,7 +172,7 @@ for (const job of JOBS) {
     return m.replace(/ 1 Tf$/, '');
   };
 
-  // "Scan for FSSAI licence" caption under the QR, in the menu's own small-text face
+  // "Scan for FSSAI license" caption under the QR, in the menu's own small-text face
   if (job.caption) {
     const C = job.caption;
     const font = resolveFont(C.fontRole);

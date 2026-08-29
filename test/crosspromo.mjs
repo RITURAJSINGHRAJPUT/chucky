@@ -90,7 +90,7 @@ section('capiche — no licence line, spans intact');
   const SRC = path.join(CAP, 'capiche.pdf');
   const E = await bootEditor(CAP, { expose: ['memSnapshot'] });
   rec('capiche: no FM.license (line removed on owner request)', !E.FM.license);
-  // the caption "SCAN FOR FSSAI LICENCE" stays; only the "FSSAI LIC. NO." label is gone
+  // the caption "SCAN FOR FSSAI LICENSE" stays; only the "FSSAI LIC. NO." label is gone
   rec('capiche: no "FSSAI LIC. NO." label printed', !textLines(SRC, 1).some(l => l.text.includes('LIC. NO.')));
 
   E.reset(); E.takeWarnings();
