@@ -4,9 +4,6 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Capiche · Menu Editor</title>
-<link rel="icon" href="/favicon.svg" type="image/svg+xml">
-<link rel="icon" href="/favicon.png" sizes="32x32" type="image/png">
-<link rel="apple-touch-icon" href="/apple-touch-icon.png">
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=EB+Garamond:ital,wght@0,400;0,500;0,600;1,400&family=DM+Mono:wght@300;400;500&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js"></script>
@@ -117,9 +114,6 @@ main.app{display:grid;grid-template-columns:210px 1fr minmax(400px,560px);height
 .name:focus{background:rgba(233,184,51,.09);box-shadow:inset 0 0 0 1px var(--aiko-line)}
 .prices{display:flex;gap:6px;flex:none}
 .pwrap{display:flex;align-items:center}
-.pcol{display:flex;flex-direction:column;gap:3px;align-items:center}
-.plbl{font-size:9px;letter-spacing:.12em;color:var(--muted);text-transform:uppercase;white-space:nowrap}
-.nrow.withcols{align-items:flex-end}
 .price{width:66px;background:#100E09;border:1px solid var(--line2);border-radius:7px;color:var(--cream);font-family:var(--mono);font-size:15px;font-weight:500;text-align:right;padding:6px 9px;outline:none;font-variant-numeric:tabular-nums}
 .price:focus{border-color:var(--aiko-line)}
 .price.err{border-color:var(--bad);background:#fff6f6;color:#1a1400}
@@ -2379,13 +2373,11 @@ function renderAddZone(ed){
     const tag=document.createElement('span'); tag.className='ac-tag'; tag.textContent=' NEW IN '+sec.label+' ';
     nrow.appendChild(tag);
     const pwrap=document.createElement('div'); pwrap.className='prices';
-    const _acols=(sec&&sec.cols)||[]; if(_acols.length) nrow.classList.add('withcols');
-    [['price',_acols[0]||'Regular'],['price2',_acols[1]||'Large']].forEach(([k,ttl])=>{
+    [['price','Regular'],['price2','Large']].forEach(([k,ttl])=>{
       const w=document.createElement('div'); w.className='pwrap';
       const inp=document.createElement('input'); inp.className='price'; inp.title=ttl; inp.inputMode='numeric'; inp.value=a[k]||'';
       inp.oninput=()=>{ const v=cleanFor(inp.value,'price'); if(inp.value!==v) inp.value=v; a[k]=v.trim(); schedulePreview(); };
-      w.appendChild(inp);
-      if(_acols.length){ const col=document.createElement('div'); col.className='pcol'; const lbl=document.createElement('span'); lbl.className='plbl'; lbl.textContent=ttl; col.appendChild(lbl); col.appendChild(w); pwrap.appendChild(col); } else pwrap.appendChild(w);
+      w.appendChild(inp); pwrap.appendChild(w);
     });
     nrow.appendChild(pwrap);
     const rm=document.createElement('button'); rm.className='rm'; rm.type='button'; rm.textContent='\u2715';
@@ -2429,7 +2421,7 @@ function renderAddZone(ed){
     +'<div class="afmeta af-dmeta"></div>'
     +'<div class="af2"><div><label>Grams</label><input type="text" class="af-grams" maxlength="4" placeholder="130"></div>'
     +'<div><label class="af-plabel">Price \u20b9</label><input type="text" class="af-price" maxlength="4" placeholder="560"></div>'
-    +'<div class="af-p2wrap" style="display:none"><label class="af-p2label">Large \u20b9</label><input type="text" class="af-price2" maxlength="4" placeholder="760"></div></div>'
+    +'<div class="af-p2wrap" style="display:none"><label>Large \u20b9</label><input type="text" class="af-price2" maxlength="4" placeholder="760"></div></div>'
     +'<label>Markers</label><div class="afchk">'
     /* Built from MARKER_TYPES rather than hard-coded, so the ADD form can never drift from the dish
        cards again: this list still offered Korea (an Aiko marker, removed from this menu) and was
@@ -2456,7 +2448,7 @@ function renderAddZone(ed){
     const ov=wrapDesc(fullDesc,56,2).overflow;
     dmeta.textContent = db.length?('can\u2019t print:  '+db.map(c=>c===' '?'space':c).join('  ')):(ov?'too long \u2014 trim to fit 2 lines':(spD.bad.length?('spelling: '+spD.bad.join('  ')):(spD.warn.length?('check: '+spD.warn.join(' ')):(fullDesc.length+' chars')))); dmeta.className='afmeta'+((db.length||ov||spD.bad.length)?' bad':'');
     const si=+secEl.value, sec=SECTIONS[si], full=addedCountInSec(si)>=secCapacity(sec);
-    const two=sec.price_right_2!=null; p2wrap.style.display=two?'':'none'; const _mc=(sec&&sec.cols)||[]; plabel.textContent=two?((_mc[0]||'Regular')+' \u20b9'):'Price \u20b9'; const _p2l=p2wrap.querySelector('.af-p2label'); if(_p2l) _p2l.textContent=(_mc[1]||'Large')+' \u20b9';
+    const two=sec.price_right_2!=null; p2wrap.style.display=two?'':'none'; plabel.textContent=two?'Regular \u20b9':'Price \u20b9';
     const p2b=two?bad(price2El.value.trim(),ALLOWED.price):[];
     if(full){ nmeta.textContent='this section is full \u2014 remove one or pick another'; nmeta.className='afmeta bad'; }
     /* Spelling is ADVISORY, not a blocker. The suggestion line above still shows it, but a menu is
@@ -2588,11 +2580,7 @@ function buildEditor(){
     name.textContent = (it.name.id in edits)? edits[it.name.id] : it.name.display;
     nrow.appendChild(name);
     const pr=document.createElement('div'); pr.className='prices';
-    // size labels (e.g. 28 cm / 38 cm) come from the section's `cols` — the same source Churn'd uses
-    const _psec=(SECTIONS||[]).filter(s=>s.page===it.name.page).sort((a,b)=>Math.abs(a.col_x-it.name.x)-Math.abs(b.col_x-it.name.x))[0];
-    const _cols=(_psec&&Math.abs(_psec.col_x-it.name.x)<140&&_psec.cols)||[]; if(_cols.length) nrow.classList.add('withcols');
-    it.prices.forEach((p,i)=>{ const w=document.createElement('div'); w.className='pwrap'; const inp=document.createElement('input'); inp.className='price'; inp.dataset.id=p.id; inp.dataset.orig=p.text; inp.value=(p.id in edits)?edits[p.id]:p.text; inp.inputMode='numeric'; w.appendChild(inp);
-      if(_cols[i]){ const col=document.createElement('div'); col.className='pcol'; const lbl=document.createElement('span'); lbl.className='plbl'; lbl.textContent=_cols[i]; col.appendChild(lbl); col.appendChild(w); pr.appendChild(col); } else pr.appendChild(w); });
+    for(const p of it.prices){ const w=document.createElement('div'); w.className='pwrap'; const inp=document.createElement('input'); inp.className='price'; inp.dataset.id=p.id; inp.dataset.orig=p.text; inp.value=(p.id in edits)?edits[p.id]:p.text; inp.inputMode='numeric'; w.appendChild(inp); pr.appendChild(w); }
     nrow.appendChild(pr);
     const rm=document.createElement('button'); rm.className='rm'; rm.type='button'; rm.title='Remove this item from the menu'; rm.textContent='✕';
     rm.addEventListener('click',()=>{ removed.add(it.name.id); buildEditor(); regenerate().then(renderPreview); });

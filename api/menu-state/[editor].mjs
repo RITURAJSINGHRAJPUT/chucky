@@ -28,7 +28,7 @@ export const config = { runtime: 'edge' };
 // the real MEM_BRAND values used across the 6 editors (drinks/index.html uses 'aiko-drinks', not
 // 'drinks') — validated before building a key so this route can't be used to read/write arbitrary
 // key names. Exported so tests can check the allowlist directly.
-export const EDITORS = new Set(['capiche', 'aiko', 'churnd', 'aiko-drinks', 'capiche-surat', 'capiche-ahm']);
+export const EDITORS = new Set(['capiche', 'aiko', 'churnd', 'aiko-drinks', 'capiche-surat', 'capiche-ahm', 'beshak']);
 export const stateKey = (editor) => 'menu_state_' + editor;
 
 // Validation/auth is checked BEFORE the store-configured check (not after) — a 404/403/405 should

@@ -17,7 +17,9 @@
     "test:churnd": "node churndh.js",
     "test:drinks": "node src/drinks/harness_bands.js",
     "test:bugapi": "node test/bugapi.test.mjs",
-    "test:menustate": "node test/menustate.test.mjs"
+    "test:menustate": "node test/menustate.test.mjs",
+    "beshak:build": "node src/beshak/build_beshak.js && node src/beshak/build_editor.js",
+    "test:beshak": "node test/beshak.test.mjs"
   },
   "dependencies": {
     "@netlify/blobs": "^8.1.0",

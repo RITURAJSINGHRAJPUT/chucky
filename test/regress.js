@@ -228,11 +228,12 @@ const EDITORS = [
   // and the charset data the gate relies on must actually exist
   await guard('every editor declares a per-role charset (FM.allowed)', async () => {
     const missing = [];
-    for (const d of ['capiche', 'aiko', 'churnd', 'drinks', 'capiche-surat', 'capiche-ahm']) {
+    const brands = ['capiche', 'aiko', 'churnd', 'drinks', 'capiche-surat', 'capiche-ahm', 'beshak'];
+    for (const d of brands) {
       const fm = JSON.parse(fs.readFileSync(path.join(ED(d), 'fieldmap.json'), 'utf8'));
       if (!fm.allowed || !Object.keys(fm.allowed).length) missing.push(d);
     }
-    return [!missing.length, missing.length ? 'missing: ' + missing.join(', ') : 'all six'];
+    return [!missing.length, missing.length ? 'missing: ' + missing.join(', ') : `all ${brands.length}`];
   });
 
   // ---- 11b. category (section heading) editing -------------------------------------------------
@@ -472,7 +473,8 @@ const EDITORS = [
   for (const [name, script] of [['bug API input clamps', 'test/bugapi.test.mjs'],
                                 ['/bugs/ dashboard neutralises hostile records', 'test/bugsdash.test.mjs'],
                                 ['capiche: ADD-ONS block fully editable', 'test/capiche.addons.mjs'],
-                                ['cross-promo QRs + capiche FSSAI licence line', 'test/crosspromo.mjs']]) {
+                                ['cross-promo QRs + capiche FSSAI licence line', 'test/crosspromo.mjs'],
+                                ['publish API allowlist + payload clamps', 'test/menustate.test.mjs']]) {
     await guard(name, async () => {
       try { const o = run(script, []); const m = /(\d+) passed, (\d+) failed/.exec(o);
             return [m && m[2] === '0', m ? `${m[1]} passed, ${m[2]} failed` : 'no summary line']; }
@@ -480,6 +482,16 @@ const EDITORS = [
                   return [false, m ? `${m[1]} passed, ${m[2]} failed` : String(e.message).slice(0, 90)]; }
     });
   }
+
+  // ---- 13. Beshak ------------------------------------------------------------------------------
+  // Beshak keeps its editable bytes inside Form XObjects rather than page content streams, so its
+  // byte-identity and layout checks cannot reuse the helpers above; its suite owns them.
+  await guard('beshak: edits, markers, reflow, add/remove (own suite)', async () => {
+    try { const o = run('test/beshak.test.mjs', []); const m = /Beshak: (\d+)\/(\d+) passed/.exec(o);
+          return [m && m[1] === m[2], m ? `${m[1]}/${m[2]} passed` : 'no summary line']; }
+    catch (e) { const o = String(e.stdout || e.message); const m = /Beshak: (\d+)\/(\d+) passed/.exec(o);
+                return [false, m ? `${m[1]}/${m[2]} passed` : String(e.message).slice(0, 120)]; }
+  });
 
   // ---- summary ---------------------------------------------------------------------------------
   const n = s => results.filter(r => r.status === s).length;
