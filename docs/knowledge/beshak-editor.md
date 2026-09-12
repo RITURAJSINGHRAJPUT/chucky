@@ -10,9 +10,16 @@ metadata:
 **Live path:** `/beshak/` · **`MEM_BRAND`:** `beshak` · **Source artwork:** `incoming/Beshak_DineIn_Menu.pdf`
 **Build:** `npm run beshak:build` (data + editor) · **Test:** `npm run test:beshak` (also folded into `npm test`)
 
-Two A4 pages: APPS on page 1; DRINKS / BREADS / MAINS / DESSERT on page 2. 26 dishes, each with a
-name, a "250 gm" / "300 ml" size label, a price, a description, and up to four allergen markers
-(dairy · gluten · sesame · jain).
+Two A4 pages: APPS / BREADS / MAINS on page 1; DRINKS / DESSERT on page 2. 30 dishes, each with a
+name, a "250 gm" / "300 ml" size label, a price, a description, and up to three allergen markers
+(dairy · gluten · jain).
+
+> **Built from the 12 Sep 2026 artwork.** That drop changed the menu's shape, not just its
+> wording: sections moved between pages, MAINS gained a third column, the dish count went 26 → 30,
+> and **sesame was dropped from the legend entirely**. Before it, page 2's markers and section
+> rules were baked into a full-page raster; they are all drawn in the content stream now. If you
+> are reading this against an older PDF, the four "Why Beshak needed its own everything" points
+> below still hold except §4, which that drop retired.
 
 ---
 
@@ -76,33 +83,44 @@ a PDF with the fonts fully embedded (not subsetted); nothing in this repo can in
 advance width. Zeroing the lsb shifts every glyph horizontally — it rendered as a ~0.7pt creep that
 looked like a kerning bug and cost a while to find.
 
-### 4. Page 2's dairy / gluten / sesame markers are pixels, not paths
+### 4. The three markers are not drawn the same way
 
-Blanking the page's background image and re-rendering proves it: on page 2 only the Jain "J"
-survives. The milk bottle, the wheat ear, the sesame cluster and the section rules under each
-heading are all baked into a ~305dpi full-page raster.
+All three are now in the content stream on both pages (the pre-Sep-2026 artwork baked page 2's
+into a raster; `trace.js`'s header still describes that world). But they split two ways, and
+`iconInventory()` in the builder keys off exactly that:
 
-That is worked around, not lived with:
-* **Removing** a raster marker paints its box out. The artwork behind every marker slot is pure
-  white (sampled, not assumed), so a `0 0 0 0 k … re f` box is invisible.
-* **Adding** one stamps a vector. Dairy and Jain are lifted exactly from page 1's real vectors;
-  gluten and sesame are traced from the raster by `src/beshak/trace.js`, which walks the **0.5
-  iso-contour of the ink coverage** rather than thresholding to a bitmask — thresholding throws the
-  sub-pixel edge away and leaves a visible staircase at print zoom.
-* Sesame appears only in the legend, which draws its icons larger than the inline ones (measured:
-  inline dairy 5.22×9.84pt vs legend 5.94×11.22), so the sesame trace is scaled by `0.877`.
+* **dairy** and **jain** are drawn as `q <outline> W n /RNNN Do Q` — the outline **clips** an
+  XObject that fills a rectangle. Clipping and filling both use the nonzero rule, so
+  `<outline> f` under the brand colour paints identical pixels while depending on nothing. That
+  is what lets the builder lift them as reusable stamps and `stampMarker` re-emit them anywhere.
+* **gluten** clips a plain rectangle and paints an **image** through it — there is no outline to
+  lift. Its stamp is traced off the printed page by `src/beshak/trace.js`, which walks the **0.5
+  iso-contour of the ink coverage** rather than thresholding to a bitmask (thresholding throws
+  the sub-pixel edge away and leaves a visible staircase at print zoom). The trace region is
+  derived from an instance found in the stream, not hard-coded, so it follows the artwork.
 
-An icon in the source is drawn as `q <outline> W n /RNNN Do Q` — the outline **clips** an XObject
-that fills a rectangle. Clipping and filling both use the nonzero rule, so `<outline> f` under the
-brand colour paints identical pixels while depending on nothing; that is what `stampMarker` emits,
-and it is why a stamp works on either page.
+The distiller writes gluten as **two adjacent blocks** (the bare `re W* n`, then the same rect
+plus the `Do`). Both have to go when the marker is removed, so `iconInventory()` merges them into
+the single span that deletes it — take only the first and the icon stays on the page.
+
+All three measure ~8.2–8.6pt tall, so size alone cannot tell them apart. Counting enclosed white
+gaps can: the wheat ear has one per grain (~9), the milk bottle a few (~3), and the Jain "J" none
+— and the "J" is the only wide one (~5.4pt against ~4.4). That is the rule in both the stream
+inventory and `detectMarkers()`, the render-audit path the tests read exports through.
 
 ### 5. Section bands come from the rules, not the headings
 
-BREADS and MAINS share a baseline, and MAINS is set flush right over its own two columns — so
-neither heading order nor heading x can say which dish belongs to which. What does separate them is
-the **rule under each heading**, which spans exactly the block it introduces. On page 2 those rules
-are in the raster, so `detectBands()` finds them as ink rather than as operators.
+BREADS and MAINS share a baseline, and MAINS is set flush right over its own columns — so neither
+heading order nor heading x can say which dish belongs to which. What does separate them is the
+**rule under each heading**, which spans exactly the block it introduces. `detectBands()` finds
+those rules as ink rather than as operators, which is what let it keep working when page 2's rules
+moved out of the raster.
+
+⚠️ A heading can rule **several** segments: MAINS sets three columns and the designer broke its
+rule over each of them. So a band carries `spans[]`, not one `x0..x1`, and because two headings
+share a baseline their segments arrive mixed together — each segment goes to the nearest heading
+at or left of it. Keeping only the segment nearest the heading (what the builder did when MAINS
+had two columns) silently drops the third column's dishes into whatever section sits above them.
 
 ---
 
@@ -115,8 +133,17 @@ are in the raster, so `detectBands()` finds them as ink rather than as operators
   byte-identity guarantee.
 * **Removal reflows its column.** Everything below a removed dish rides up by that dish's `slot`.
   PDF y grows upward, so riding up means **adding** the slot height. Any dish that moves has its
-  raster markers patched out and re-stamped as vectors at the new spot, so nothing is left behind.
-* **Marker order** is the legend's: dairy · gluten · sesame · jain.
+  markers deleted by span and re-stamped at the new spot, so nothing is left behind.
+* **The last dish in a column needs a measured slot.** It has no neighbour below to measure
+  against, and the column's *average* pitch is not enough on its own: Sourdough Naan sets three
+  description lines where BREADS averages two, so an added dish placed at the average landed on
+  top of its last line. Its slot is the larger of the average and its own printed height plus the
+  tightest name-to-last-line clearance the designer used in that column.
+* **Marker order** is the legend's: dairy · gluten · jain.
+* **`marker_gap` is measured, not chosen.** The engine spends it before the first icon and between
+  each pair, so a value tuned for older artwork (it was 4.6) sets every re-stamped cluster about
+  2pt per gap wider than the baked ones beside it. The builder takes the median gap the designer
+  actually used — 2.4pt here.
 
 ---
 
@@ -127,7 +154,7 @@ src/beshak/
   lib.js            PDF loading + Identity-H content-stream parsing (shared by everything below)
   normalize.js      designer PDF -> editable PDF: uncompress editable streams, merge font subsets
   fontmerge.js      union of a family's two per-page subsets (TrueType glyf/loca/hmtx surgery)
-  trace.js          ink coverage -> iso-contour -> path ops (the raster-only marker icons)
+  trace.js          ink coverage -> iso-contour -> path ops (the gluten icon, which is an image)
   marker_extract.js lifts the real vector dairy/jain outlines out of the artwork
   blocks.js         top-level q..Q splitting + geometric bounds
   icons.js          XObject draw-site inventory
@@ -148,16 +175,22 @@ the suite.
 
 ## Verified
 
-* Empty edit exports **byte-identical** streams (all 32) and a **pixel-identical** render.
+* Empty edit exports **byte-identical** streams (all 36) and a **pixel-identical** render.
 * The normalisation step (uncompress + merged fonts) is pixel-identical to the designer's file at
   150dpi on both pages — the merge changes what *can* be typed, never what is already printed.
 * Marker add/remove on both pages, name/desc/price/size edits, removal with reflow, add, and the
   charset gate (including on added dishes) are each rendered and read back.
+* All 30 dishes carry a price, a size label and their printed markers, and every dish lands in the
+  section its rule puts it under (the three-column MAINS block included).
 
 ## Not done
 
-* **The cover.** Page 1's BESHAK logo is artwork, and the legend at the foot of page 2 is raster —
-  neither is editable. No other editor edits its cover either (Churn'd's is also untouched).
+* **The cover.** Page 1's BESHAK logo is artwork and no field is built for the legend at the foot
+  of page 2, so neither is editable. No other editor edits its cover either (Churn'd's is also
+  untouched).
+* **The standing copy.** "Proudly Vegetarian. Entirely Delicious." is set in the display face and
+  reads exactly like a dish name; the builder drops it because it sits under no section rule *and*
+  has no price, and says so on the build log. Copy that gains a price would need a real rule.
 * **Section headings** (APPS / DRINKS / …) are not renamable; the Gasoline face is subset to 22
   glyphs, so most words could not be set even if the UI offered it.
 * **Reordering** dishes. Removal reflows a column, but there is no drag-to-reorder (only
