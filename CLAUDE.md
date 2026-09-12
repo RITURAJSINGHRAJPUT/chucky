@@ -12,8 +12,8 @@ Deep reference notes live in `docs/knowledge/` and are pointed to where relevant
 ## What this is
 
 **Chucky** is a set of browser-based, **byte-level PDF menu editors** for the Bookends F&B group
-(brands: **Capiche** pizza/food, **Aiko** comfort food, **Churn'd** desserts, plus drinks menus for
-Aiko and Capiche). Restaurant staff open an editor in the browser, change dish names / descriptions /
+(brands: **Capiche** pizza/food, **Aiko** comfort food, **Churn'd** desserts, **Beshak** gourmet
+Indian, plus drinks menus for Aiko and Capiche). Restaurant staff open an editor in the browser, change dish names / descriptions /
 prices / allergen markers / photos, and **export a print-ready PDF that is the real designed menu
 with surgical edits** — not an HTML re-creation.
 
@@ -33,7 +33,7 @@ Cloudflare remains the documented, primary host; Vercel is not a cutover.)
 | Path | Editor |
 |------|--------|
 | `/chucky/` | Editor hub (tiles) |
-| `/capiche/` · `/aiko/` · `/churnd/` | Food editors |
+| `/capiche/` · `/aiko/` · `/churnd/` · `/beshak/` | Food editors |
 | `/drinks/` (Aiko) · `/capiche-surat/` · `/capiche-ahm/` | Drinks editors |
 | `/bugs/` | Bug-report queue dashboard |
 
@@ -160,6 +160,11 @@ already in the repo are enough to *edit* today):
 - **Food:** `node src/capiche/build_food.js <new.pdf> deploy/public/<editor>/fieldmap.json <out.json> --validate-page0`
   then swap the new PDF + `<out.json>` into `deploy/public/<editor>/`. Method + gotchas:
   `docs/knowledge/capiche-food-rebuild.md`.
+- **Beshak:** `npm run beshak:build` — rebuilds `beshak.pdf` + `fieldmap.json` from
+  `incoming/Beshak_DineIn_Menu.pdf` AND regenerates `index.html` from `src/beshak/{engine,ui}.js`.
+  Beshak's artwork is shaped unlike the others (all editable bytes live in Form XObjects, text is
+  Identity-H 2-byte CIDs, and page 2's dairy/gluten/sesame icons are baked into a raster) — read
+  `docs/knowledge/beshak-editor.md` BEFORE touching it.
 - **Drinks:** the Python pipeline in `src/capdrinks/` — see `docs/knowledge/capiche-drinks-editors.md`.
 - Design source files (PDF/.ai) come from the **design team**; they're not in this repo. The latest
   food blueprint is in `incoming/`.
@@ -181,6 +186,8 @@ already in the repo are enough to *edit* today):
   generates its own 4-quadrant fixture, override with `FRAME_JPEG`)
 - `node churndh.js <out.pdf> '<EDITS_json>'` — Churn'd. It needs its own harness: its fieldmap uses
   `items[]` not `fields[]`, so the food harnesses can never boot it. Edit keys are `n<id>` / `p<id>_<col>`.
+- `node beshakh.js <out.pdf> '<EDITS_json>'` — Beshak (env `MARKERS` / `REMOVED` / `ADDED`). Its own
+  harness because its fieldmap addresses spans by STREAM, not by page.
 - `node src/drinks/harness_bands.js` — Aiko drinks (band-model rebuild), 14 assertions.
 - If you add code calling `requestAnimationFrame`, harnesses need a rAF stub (framh.js has one).
 - **Preview caveat:** the in-browser live preview loads pdf.js from a CDN; some sandboxes block that
@@ -205,7 +212,7 @@ deploy/
   public/
     index.html                      # Bookends landing
     chucky/index.html               # editor hub
-    capiche/ aiko/ churnd/          # FOOD editors (index.html + <brand>.pdf + fieldmap.json + dicts)
+    capiche/ aiko/ churnd/ beshak/  # FOOD editors (index.html + <brand>.pdf + fieldmap.json + dicts)
     drinks/ capiche-surat/ capiche-ahm/   # DRINKS editors
     bugs/index.html                 # bug-queue dashboard
     menu/index.html                 # customer-facing page
@@ -213,11 +220,13 @@ netlify/                 # parallel Netlify port of the bug-report API (never pr
                          #   see docs/knowledge/chucky-current-state.md §5)
 src/
   capiche/build_food.js  # FOOD fieldmap builder (Node + pdf-lib)
+  beshak/                # Beshak: normaliser, font-subset merger, icon tracer, builder, engine, UI
   capdrinks/*.py         # DRINKS build pipeline (Python + pikepdf) + RobotoMono-SemiBold.ttf
   drinks/  shared/       # Aiko-drinks builder/harnesses; shared memory.js + report.js
-foodh.js markerh.js framh.js foodh_ar.js churndh.js        # test harnesses
+foodh.js markerh.js framh.js foodh_ar.js churndh.js beshakh.js   # test harnesses
 test/bugapi.test.mjs     # drift-guard: Worker/Netlify/Vercel bug-API clamps must agree (3-way)
 test/menustate.test.mjs  # Publish API: allowlist, gating, payload clamps
+test/beshak.test.mjs     # Beshak: byte identity, markers, reflow, add/remove, charset gate
 docs/knowledge/          # detailed engineering notes (READ when touching a tricky area)
 backups/                 # timestamped safety copies   incoming/  # latest raw blueprint PDF
 ```
@@ -232,8 +241,8 @@ worth the coupling. If you change a clamp/limit in one copy, change it in all th
 `node test/bugapi.test.mjs`.
 
 Deep reference in **`docs/knowledge/`** (with its own index README): the whole-system notes, the food
-rebuild method, drinks pipeline, the `keepFont()` fontless-inherit bug, reflow pitch, marker
-signatures, roomier-text fitting, personalise-cover, and the bug-report loop. Check there first when
+rebuild method, drinks pipeline, **the Beshak build**, the `keepFont()` fontless-inherit bug, reflow
+pitch, marker signatures, roomier-text fitting, personalise-cover, and the bug-report loop. Check there first when
 something behaves oddly.
 
 ---

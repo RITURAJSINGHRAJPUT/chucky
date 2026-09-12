@@ -28,8 +28,8 @@ const req = (method, pathname, { body, key } = {}) => {
 console.log('\nPublish API (menu-state)\n' + '-'.repeat(52));
 
 // --- editor allowlist -----------------------------------------------------------------------
-ok([...EDITORS].sort().join(',') === 'aiko,aiko-drinks,capiche,capiche-ahm,capiche-surat,churnd',
-   'allowlist is exactly the 6 real MEM_BRAND values');
+ok([...EDITORS].sort().join(',') === 'aiko,aiko-drinks,beshak,capiche,capiche-ahm,capiche-surat,churnd',
+   'allowlist is exactly the 7 real MEM_BRAND values');
 
 for (const editor of EDITORS) {
   ok(stateKey(editor) === 'menu_state_' + editor, `stateKey('${editor}') is namespaced correctly`);
