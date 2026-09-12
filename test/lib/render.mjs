@@ -57,4 +57,32 @@ export function textLines(src, page = 0) {
   return rows.sort((a, b) => b.top - a.top);
 }
 
+/**
+ * Every glyph on a page, with its own quad — finer than textLines(), which merges a line into one
+ * font-metric box. That merge hides two things a click-target audit needs: where a glyph actually
+ * sits, and which FONT drew it. A fallback font (Beshak's "/" comes from NotoSans, not the menu
+ * face) carries a taller em box than the text around it, so a line box can claim ink that is not
+ * there. Returns [{c, font, size, x, baseline, top, bot, x0, x1}] in PDF user space (y UP).
+ */
+export function textChars(src, page = 0) {
+  const doc = open(src), pg = doc.loadPage(page), H = pg.getBounds()[3];
+  const out = [];
+  pg.toStructuredText('preserve-whitespace').walk({
+    onChar(c, origin, font, size, quad) {
+      out.push({
+        c,
+        font: (font && font.getName && font.getName()) || '',
+        size,
+        x: origin[0],
+        baseline: H - origin[1],
+        top: H - Math.min(quad[1], quad[5]),
+        bot: H - Math.max(quad[3], quad[7]),
+        x0: Math.min(quad[0], quad[4]),
+        x1: Math.max(quad[2], quad[6]),
+      });
+    },
+  });
+  return out;
+}
+
 export const pageCount = (src) => open(src).countPages();

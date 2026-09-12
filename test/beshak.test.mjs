@@ -13,7 +13,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { execFileSync } from 'child_process';
 import { createRequire } from 'module';
-import { renderPages, renderRegion, textLines } from './lib/render.mjs';
+import { renderPages, renderRegion, textLines, textChars } from './lib/render.mjs';
 
 const require = createRequire(import.meta.url);
 const { ROOT, outDir } = require('./lib/out.js');
@@ -282,6 +282,116 @@ await (async function main() {
     renderRegion(big, path.join(OUT, 'audit_apps.png'), { page: 0, x0: 36, yTop: 500, x1: 560, yBot: 290, dpi: 200 });
     renderRegion(big, path.join(OUT, 'audit_breads.png'), { page: 1, x0: 30, yTop: 500, x1: 580, yBot: 280, dpi: 200 });
     return [pages.length === 2 && sizes.every((s) => s > 20000), `page png sizes ${sizes.join(', ')}`];
+  });
+
+  // ---------------------------------------------------------------- preview click targets
+  // The overlay is invisible, so "does it work" can only mean: does each box sit on the ink of the
+  // dish it claims? Every case below matches boxes against RENDERED text (hard rule 4).
+  const deacc = (t) => t.normalize('NFD').replace(/[̀-ͯ]/g, '');
+  const nameLine = (lines, f) => {
+    const near = lines.filter((L) => Math.abs(L.x0 - f.x) < 8 && L.bot > f.y - 6 && L.bot < f.y + 8);
+    const want = deacc(f.display).slice(0, 8).toLowerCase();
+    return near.find((L) => deacc(L.text).toLowerCase().startsWith(want)) || null;
+  };
+  const holds = (b, L) => L.x0 >= b.x0 - 1 && L.x1 <= b.x1 + 1 && L.top <= b.top + 1 && L.bot >= b.bot - 1;
+
+  await guard('preview overlay: one click target per live dish, over its own rendered glyphs', async () => {
+    const { bootHarness } = require('../beshakh.js');
+    const H = await bootHarness();
+    const off = [];
+    let boxes = 0; let dishes = 0; let checked = 0;
+    for (const p of [0, 1]) {
+      const bs = H.pvBoxes(p);
+      const ids = FM.columns.filter((c) => c.page === p).flatMap((c) => c.ids);
+      boxes += bs.length; dishes += ids.length;
+      const chars = textChars(SRC, p).filter((g) => g.c.trim());
+      for (const b of bs) {
+        const f = FM.fields.find((x) => x.id === b.id);
+        if (!f) continue;
+        const col = FM.columns.find((c) => c.id === f.col);
+        const nextX = Math.min(...FM.columns.filter((c) => c.page === p && c.x > f.x + 1).map((c) => c.x), 1e4);
+        const d = kid(f.id, 'desc');
+        const rows = [f.y].concat((d && d.lines ? d.lines.map((L) => L.y) : []));
+        // every glyph this dish draws: its name row (name + gm label + price) and its description
+        const mine = chars.filter((g) => rows.some((y) => Math.abs(g.baseline - y) < 1.2)
+          && g.x >= f.x - 1 && g.x < nextX - 2);
+        if (!mine.length) continue;
+        checked++;
+        // A glyph the menu face lacks is drawn from a fallback font whose em box is taller than the
+        // text around it (Beshak's "/" is NotoSans). Its OUTLINE sits inside the row, so the top
+        // edge is judged on the fonts the dish is actually set in.
+        const tally = {};
+        for (const g of mine) tally[g.font] = (tally[g.font] || 0) + 1;
+        const main = Object.keys(tally).sort((a, c) => tally[c] - tally[a])[0];
+        const own = mine.filter((g) => g.font === main);
+        const inkTop = Math.max(...own.map((g) => g.top));
+        const inkBot = Math.min(...mine.map((g) => g.bot));
+        const inkX0 = Math.min(...mine.map((g) => g.x0));
+        const inkX1 = Math.max(...mine.map((g) => g.x1));
+        if (!(inkTop <= b.top + 0.5 && inkBot >= b.bot - 0.5 && inkX0 >= b.x0 - 0.5 && inkX1 <= b.x1 + 0.5)) {
+          off.push(`${f.display} [ink ${inkX0.toFixed(1)}..${inkX1.toFixed(1)} x ${inkBot.toFixed(1)}..${inkTop.toFixed(1)}`
+            + ` vs box ${b.x0.toFixed(1)}..${b.x1.toFixed(1)} x ${b.bot.toFixed(1)}..${b.top.toFixed(1)}]`);
+        }
+      }
+    }
+    return [boxes === dishes && off.length === 0 && checked >= 25,
+      `${boxes} targets for ${dishes} dishes, ${checked} checked glyph-by-glyph${off.length ? '; off: ' + off.join(' ') : ''}`];
+  });
+
+  await guard('preview overlay: targets never overlap, so a click cannot hit the wrong dish', async () => {
+    const { bootHarness } = require('../beshakh.js');
+    const H = await bootHarness();
+    const clash = [];
+    for (const p of [0, 1]) {
+      const bs = H.pvBoxes(p);
+      for (let i = 0; i < bs.length; i++) {
+        for (let j = i + 1; j < bs.length; j++) {
+          const a = bs[i]; const c = bs[j];
+          const ox = Math.min(a.x1, c.x1) - Math.max(a.x0, c.x0);
+          const oy = Math.min(a.top, c.top) - Math.max(a.bot, c.bot);
+          if (ox > 1 && oy > 1) clash.push(a.id + '~' + c.id);
+        }
+      }
+    }
+    return [clash.length === 0, clash.length ? 'overlapping: ' + clash.slice(0, 4).join(', ') : 'none overlap'];
+  });
+
+  await guard('preview overlay: targets ride up with the removal reflow', async () => {
+    const { bootHarness } = require('../beshakh.js');
+    const H = await bootHarness();
+    const col = FM.columns.find((c) => c.page === 0 && c.ids.length >= 3);
+    const goneId = col.ids[0];
+    const belowId = col.ids[1];
+    const before = H.pvBoxes(0).find((b) => b.id === belowId);
+    H.removed = [goneId];
+    const after = H.pvBoxes(0).find((b) => b.id === belowId);
+    const slot = FM.fields.find((f) => f.id === goneId).slot || col.pitch;
+    const moved = after.top - before.top;
+    const out = run('overlay_removed.pdf', {}, { REMOVED: JSON.stringify([goneId]) });
+    const f = FM.fields.find((x) => x.id === belowId);
+    const L = nameLine(textLines(out, 0), { ...f, y: f.y + slot });
+    const gone = !H.pvBoxes(0).some((b) => b.id === goneId);
+    return [Math.abs(moved - slot) < 0.01 && !!L && holds(after, L) && gone,
+      `moved ${moved.toFixed(2)}pt (slot ${slot.toFixed(2)}); rendered name inside its target: ${!!L && holds(after, L)}; removed dish has no target: ${gone}`];
+  });
+
+  await guard('preview overlay: clicking a target opens that dish’s card', async () => {
+    const { bootHarness } = require('../beshakh.js');
+    const H = await bootHarness();
+    H.buildEditor();
+    H.pvSync();
+    const doc = H.doc;
+    const hl = doc.getElementById('hitlayer');
+    const boxes = H.pvBoxes(0);
+    const want = dish('Papdi Chaat').id;
+    const i = boxes.findIndex((b) => b.id === want);
+    const built = hl.children.length;
+    hl.children[i].dispatchEvent(new doc.defaultView.MouseEvent('click', { bubbles: true }));
+    const card = doc.querySelector('#editor .card[data-id="' + want + '"]');
+    const flashed = !!card && card.classList.contains('flash');
+    const sel = hl.querySelectorAll('.hitbox.sel');
+    return [built === boxes.length && flashed && sel.length === 1,
+      `${built} targets rendered; card flashed: ${flashed}; highlighted target: ${sel.length}`];
   });
 
   const failed = results.filter((r) => !r.ok);

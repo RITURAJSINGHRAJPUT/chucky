@@ -59,6 +59,7 @@ function sandbox() {
   };
   global.TextEncoder = TextEncoder; global.TextDecoder = TextDecoder;
   global.requestAnimationFrame = (cb) => setTimeout(() => cb(Date.now()), 0);
+  if (!win.Element.prototype.scrollIntoView) win.Element.prototype.scrollIntoView = function () {};
 
   const ctx = win;
   vm.createContext(ctx);
@@ -78,6 +79,8 @@ function sandbox() {
     + 'get markerEdits(){return markerEdits;}, set markerEdits(v){markerEdits=v;},'
     + 'get pristine(){return PRISTINE;},'
     + 'regenerate, buildEditor, boot, wrapText, textWidth, markerSlots, fieldIssues, addedIssues, memSnapshot, memApply,'
+    + 'pvBoxes, pvSync, pvJump, byId, kidsOf,'
+    + 'get doc(){return document;},'
     + 'ready:()=>!!(typeof FM!=="undefined" && FM && Object.keys(PRISTINE).length)};';
   vm.runInContext(engine + expose, ctx);
   return ctx.__h;

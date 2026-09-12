@@ -899,6 +899,7 @@ function markIssues(row, f) {
 function dishCard(d) {
   const card = document.createElement('article');
   card.className = 'card' + (removed.includes(d.id) ? ' gone' : '');
+  card.dataset.id = d.id;
   card.dataset.name = (curText(d) + ' ' + ((kidsOf[d.id] || {}).desc ? curText(kidsOf[d.id].desc) : '')).toLowerCase();
   const k = kidsOf[d.id] || {};
   const head = document.createElement('div');
@@ -947,6 +948,7 @@ function markerChips(d) {
 function addedCard(a) {
   const card = document.createElement('article');
   card.className = 'card added';
+  card.dataset.id = 'add:' + added.indexOf(a);
   card.dataset.name = (a.name || '').toLowerCase();
   card.innerHTML = `<div class="chead"><span class="cnum">New item</span></div>`;
   const del = document.createElement('button');
@@ -1054,6 +1056,157 @@ function schedulePreview() {
   previewTimer = setTimeout(() => { renderPreview().catch(() => {}); }, 260);
 }
 
+// ============================================================ click the preview to edit
+/* Invisible boxes are laid over the rendered page, positioned in PERCENT of the page so they stay
+   aligned at any preview scale / window size. Clicking one scrolls to that dish's card and focuses
+   it — the same gesture Aiko/Capiche/Churn'd already have. Boxes follow the removal reflow and a
+   description that grew a line, so they track what is actually on screen. */
+let _pvSel = null;
+
+function pvHitLayer() {
+  const cv = document.getElementById('preview');
+  if (!cv) return null;
+  let st = document.getElementById('pstage');
+  if (!st) {                                  // wrap the canvas once so the overlay hugs it exactly
+    st = document.createElement('div');
+    st.id = 'pstage';
+    cv.parentNode.insertBefore(st, cv);
+    st.appendChild(cv);
+    const hl = document.createElement('div');
+    hl.id = 'hitlayer';
+    st.appendChild(hl);
+  }
+  return st.querySelector('#hitlayer');
+}
+
+/** The same reflow `regenerate()` applies: everything below a removed dish rides up by its slot. */
+function pvShifts() {
+  const shift = {};
+  for (const c of FM.columns) {
+    let dy = 0;
+    for (const id of c.ids) {
+      if (removed.includes(id)) { dy += (byId[id] || {}).slot || c.pitch; continue; }
+      shift[id] = dy;
+    }
+  }
+  return shift;
+}
+
+/** How far a description's glyphs drop below their baseline — parentheses and “g” need ~0.39em. */
+function descGap(desc) {
+  return Math.max(3, (desc.size || 10) * 0.45);
+}
+
+/** Width of one description line as it will be drawn. */
+function pvLineRight(desc, text, x) {
+  return x + textWidth(text || '', famOf(desc), desc.size, desc.kern);
+}
+
+// one box per visible dish on `page`, in PDF space (y up)
+function pvBoxes(page) {
+  const shift = pvShifts();
+  const out = [];
+  for (const c of FM.columns) {
+    if (c.page !== page) continue;
+    for (const id of c.ids) {
+      if (removed.includes(id)) continue;
+      const n = byId[id];
+      if (!n) continue;
+      const k = kidsOf[id] || {};
+      const dy = shift[id] || 0;
+      const top = n.y + (n.size || 14) * 0.95 + dy;
+      let bot = n.y - 5 + dy;
+      let x0 = n.x;
+      let x1 = nameRight(n);
+      // the trailing cluster: gm label and allergen markers sit to the right of the name
+      if (n.marker_geom && n.marker_geom.to) x1 = Math.max(x1, n.marker_geom.to);
+      for (const m of n.marker_boxes || []) x1 = Math.max(x1, m.x + m.w);
+      if (k.gram) x1 = Math.max(x1, k.gram.bbox ? k.gram.bbox[2] : k.gram.x);
+      if (k.price) {
+        x1 = Math.max(x1, k.price.x
+          + textWidth(curText(k.price), famOf(k.price), k.price.size, k.price.kern));
+      }
+      if (k.desc) {
+        const d = k.desc;
+        const baked = d.lines || [];
+        let live = baked.length;
+        if (edits[d.id] !== undefined) {       // an edited description may have claimed a new line
+          const wrapped = wrapText(edits[d.id], famOf(d), d.size, c.width,
+            baked.length + extraLines(n, d), d.kern);
+          live = Math.max(1, wrapped.length);
+          wrapped.forEach((t) => { x1 = Math.max(x1, pvLineRight(d, t, d.x)); });
+        } else {
+          for (const L of baked) x1 = Math.max(x1, pvLineRight(d, L.text, L.x));
+        }
+        const lastY = baked.length ? baked[baked.length - 1].y : d.y;
+        bot = Math.min(bot, lastY - Math.max(0, live - baked.length) * d.pitch - descGap(d) + dy);
+        x0 = Math.min(x0, d.x);
+      }
+      out.push({ id, x0: x0 - 5, x1: x1 + 4, top, bot });
+    }
+  }
+  // dishes the user added sit below the last live dish of their column (see addedDishOps)
+  added.forEach((a, i) => {
+    const c = FM.columns.find((x) => x.id === a.col);
+    if (!c || c.page !== page) return;
+    const liveIds = c.ids.filter((id) => !removed.includes(id));
+    const bottom = byId[liveIds.length ? liveIds[liveIds.length - 1] : c.ids[c.ids.length - 1]];
+    if (!bottom) return;
+    const k = kidsOf[bottom.id] || {};
+    const y = bottom.y - (bottom.slot || c.pitch) * (a.index || 1);
+    const top = y + (bottom.size || 14) * 0.95;
+    let bot = y - 5;
+    let x1 = c.x + textWidth(a.name || '', famOf(bottom), bottom.size, bottom.kern);
+    if (k.price && a.price) {
+      x1 = Math.max(x1, k.price.x + textWidth(String(a.price), famOf(k.price), k.price.size, k.price.kern));
+    }
+    if (k.desc && a.desc) {
+      const d = k.desc;
+      const lines = wrapText(a.desc, famOf(d), d.size, c.width, 4, d.kern);
+      lines.forEach((t) => { x1 = Math.max(x1, pvLineRight(d, t, c.x)); });
+      bot = Math.min(bot, y - (bottom.y - d.y) - (lines.length - 1) * d.pitch - descGap(d));
+    }
+    out.push({ id: 'add:' + i, x0: c.x - 5, x1: x1 + 4, top, bot });
+  });
+  return out;
+}
+
+function pvSync() {
+  const hl = pvHitLayer();
+  if (!hl) return;
+  let boxes;
+  try { boxes = pvBoxes(activePage); } catch (e) { hl.innerHTML = ''; return; }
+  const sz = (FM.page_sizes || [])[activePage] || [595.5, 842.25];
+  const W = sz[0];
+  const H = sz[1];
+  hl.innerHTML = '';
+  for (const b of boxes) {
+    const d = document.createElement('div');
+    d.className = 'hitbox' + (_pvSel === b.id ? ' sel' : '');
+    d.style.left = (b.x0 / W * 100) + '%';
+    d.style.width = (Math.max(10, b.x1 - b.x0) / W * 100) + '%';
+    d.style.top = ((H - b.top) / H * 100) + '%';
+    d.style.height = (Math.max(8, b.top - b.bot) / H * 100) + '%';
+    d.title = 'Click to edit this item';
+    d.addEventListener('click', () => pvJump(b.id));
+    hl.appendChild(d);
+  }
+}
+
+function pvJump(id) {
+  _pvSel = id;
+  pvSync();
+  const sel = window.CSS && CSS.escape ? CSS.escape(id) : id;
+  const card = document.querySelector('#editor .card[data-id="' + sel + '"]');
+  if (!card) return;
+  card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  card.classList.remove('flash');
+  void card.offsetWidth;
+  card.classList.add('flash');
+  const input = card.querySelector('input:not([type=checkbox]), textarea');
+  if (input) setTimeout(() => input.focus(), 260);
+}
+
 // ============================================================ preview / export
 async function renderPreview() {
   const canvas = document.getElementById('preview');
@@ -1073,6 +1226,7 @@ async function renderPreview() {
     await page.render({ canvasContext: canvas.getContext('2d'), viewport: vp }).promise;
     const tag = document.getElementById('ptag');
     if (tag) tag.textContent = '— Page ' + (activePage + 1);
+    try { pvSync(); } catch (_) { /* overlay is best-effort */ }
   } catch (e) {
     if (!/Cancelled/i.test(String(e && e.message))) throw e;
   } finally { if (busy) busy.style.display = 'none'; }
