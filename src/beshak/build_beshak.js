@@ -11,9 +11,9 @@
 //   2. Text is Identity-H: every glyph is a 2-byte CID and each one is its own tiny string in a
 //      kerned TJ array. Editing means re-encoding through the font's ToUnicode map, so the
 //      fieldmap ships the unicode->CID table and the per-CID widths.
-//   3. Page 1's dairy/gluten/sesame markers are baked into the page's background raster, not
-//      drawn as vectors. Removing one means painting the (pure white) area out and re-stamping
-//      what should be there, so those markers carry a `patch` box instead of a byte span.
+//   3. The markers are not uniform. dairy and jain are outlines that can be lifted and re-stamped
+//      anywhere; gluten is an image XObject with no outline to lift, so its stamp is traced off
+//      the printed page instead. All three are drawn in the stream, so all three delete by span.
 const fs = require('fs');
 const path = require('path');
 const { PDFName } = require('pdf-lib');
@@ -28,19 +28,13 @@ const SRC = process.env.BESHAK_SRC || 'incoming/Beshak_DineIn_Menu.pdf';
 const OUT_DIR = process.argv[2] || 'deploy/public/beshak';
 
 const FAM = { name: 'GTAmericaTrial-CmBd', nameAlt: 'GTAmericaTrial-CmRg', desc: 'TestSohne-Buch', head: 'TGGasolineRegular', sym: 'NotoSans-Regular' };
-const MARKERS = ['dairy', 'gluten', 'sesame', 'jain'];       // the legend's order, left to right
+const MARKERS = ['dairy', 'gluten', 'jain'];                 // the legend's order, left to right
 const r2 = (v) => Math.round(v * 100) / 100;
 const isPrice = (t) => /^\d{2,4}$/.test(t.trim());
 
-// Where the traced markers come from in the source artwork (points, y-up).
-const TRACE_REGIONS = {
-  gluten: { page: 1, x0: 143.4, yTop: 495.0, x1: 150.2, yBot: 483.4, dpi: 2400 },
-  sesame: { page: 1, x0: 456.3, yTop: 60.2, x1: 466.8, yBot: 50.0, dpi: 1200 },
-};
-// The legend draws its icons larger than the ones set beside a dish: inline dairy measures
-// 5.22x9.84pt against the legend's 5.94x11.22. Sesame exists ONLY in the legend, so its trace
-// has to be brought down to inline scale by that ratio.
-const LEGEND_TO_INLINE = 0.877;
+// Every icon in this artwork is ~8.2-8.6pt tall and nothing else in a marker strip reaches 8,
+// so this one threshold separates markers from the gm/ml label's digits in both detectors.
+const MARKER_MIN_H = 7.6;
 // Real section headings. The back page also sets "Elevated," / "not alienated" in the heading
 // face — that is the tagline, not a section, and no dish sits under it.
 const SECTION_LABELS = ['APPS', 'DRINKS', 'BREADS', 'MAINS', 'DESSERT'];
@@ -123,15 +117,29 @@ async function detectBands(pdfPath, headings) {
       if (picked.some((p) => Math.abs(p.x0 - r.x0) < 20)) continue;
       picked.push(r);
     }
-    // the rule belonging to THIS heading is the one that starts nearest its own left edge
-    let best = null, bestD = Infinity;
-    for (const r of picked) {
-      const x0 = R.x0 + r.x0 / M.scale, x1 = R.x0 + r.x1 / M.scale;
-      const d = Math.min(Math.abs(x0 - h.x), Math.abs(x1 - (h.x + 80)));
-      if (d < bestD) { bestD = d; best = { x0: r2(x0), x1: r2(x1), y: r2(R.yTop - r.y / M.scale) }; }
-    }
-    bands.push({ ...h, ...(best || { x0: 0, x1: 600, y: h.y - 8 }) });
+    const segs = picked
+      .map((r) => ({ x0: r2(R.x0 + r.x0 / M.scale), x1: r2(R.x0 + r.x1 / M.scale), y: r2(R.yTop - r.y / M.scale) }))
+      .sort((a, b) => a.x0 - b.x0);
+    bands.push({ ...h, segs });
   }
+  // A heading can rule SEVERAL segments — MAINS sets three columns here and the designer broke
+  // its rule over each — and two headings can share a baseline (BREADS and MAINS do), so their
+  // segments arrive mixed together. Give each segment to the nearest heading at or left of it,
+  // which is the reading order the rules were drawn in.
+  // resolved against the HEADING baselines, so do it before any band's y is moved to its rule
+  const spans = bands.map((b) => b.segs.filter((s) => {
+    const owner = bands
+      .filter((o) => o.page === b.page && Math.abs(o.y - b.y) < 6 && o.x <= s.x0 + 12)
+      .sort((p, q) => q.x - p.x)[0];
+    return !owner || owner.label === b.label;
+  }).map((s) => [s.x0, s.x1]));
+  bands.forEach((b, i) => {
+    b.spans = spans[i].length ? spans[i] : [[0, 600]];
+    b.x0 = Math.min(...b.spans.map((s) => s[0]));
+    b.x1 = Math.max(...b.spans.map((s) => s[1]));
+    b.y = b.segs.length ? b.segs[0].y : r2(b.y - 8);
+    delete b.segs;
+  });
   return bands;
 }
 
@@ -181,8 +189,52 @@ function holeCount(mask, w, h, c) {
 }
 
 /**
- * Find the markers set beside one dish by looking at the printed page, so vector and
- * raster-baked markers are discovered the same way.
+ * Every marker icon drawn in one stream, with the byte span that draws it.
+ *
+ * All three are drawn as `q <clip> W n ... /RNNN Do Q`, but they split cleanly:
+ *   * dairy and jain clip with their own OUTLINE, so their block carries curve ops. The "J" is
+ *     the wider of the two (~5.5pt against the bottle's ~4.6).
+ *   * gluten clips with a plain rectangle and paints an image through it — no curves at all.
+ *     The distiller emits that as two adjacent blocks (the bare `re W* n`, then the same rect
+ *     plus the `Do`), and BOTH have to go when the marker is removed, so they are merged here.
+ */
+function iconInventory(streamText) {
+  const raw = [];
+  for (const [a, b] of topLevelBlocks(streamText)) {
+    const bb = bboxOf(streamText.slice(a, b));
+    if (!bb) continue;
+    const w = bb.w / 10, h = bb.h / 10;
+    if (w < 3.5 || w > 8 || h < MARKER_MIN_H || h > 12) continue;
+    const chunk = streamText.slice(a, b);
+    const curved = /(?:^|\s)[\d.-]+\s+[\d.-]+\s+[cvyl](?:\s|$)/.test(chunk);
+    raw.push({
+      type: !curved ? 'gluten' : (w >= 5.2 ? 'jain' : 'dairy'),
+      x: r2(bb.x / 10), y: r2(bb.y / 10), w: r2(w), h: r2(h), span: [a, b],
+    });
+  }
+  // merge gluten's clip/draw pair (same box, back to back) into the one span that removes it
+  const out = [];
+  for (const i of raw) {
+    const prev = out[out.length - 1];
+    if (prev && prev.type === 'gluten' && i.type === 'gluten'
+      && Math.abs(prev.x - i.x) < 0.2 && Math.abs(prev.y - i.y) < 0.2 && i.span[0] - prev.span[1] <= 1) {
+      prev.span[1] = i.span[1];
+      continue;
+    }
+    out.push(i);
+  }
+  return out.sort((p, q) => q.y - p.y || p.x - q.x);
+}
+
+/**
+ * Find the markers set beside one dish by looking at the printed page. This reads the RENDERED
+ * ink rather than the operators, so it is the independent check on what a customer actually sees
+ * — that is what makes it worth keeping now that the build itself reads markers off the stream
+ * (`iconInventory`), and it is the route `test/beshak.test.mjs` audits exports through.
+ *
+ * All three icons are set at the same height in this artwork (~8.2-8.4pt), so size alone cannot
+ * separate them. What does: the wheat ear encloses one white gap per grain, the milk bottle a
+ * handful, and the Jain "J" none at all — and the "J" is the only wide one.
  */
 async function detectMarkers(src, page, x0, x1, yBase, dpi = 1200) {
   const region = { page, x0, yTop: yBase + 11, x1, yBot: yBase - 4, dpi };
@@ -196,20 +248,12 @@ async function detectMarkers(src, page, x0, x1, yBase, dpi = 1200) {
     w: r2((c.maxx - c.minx + 1) / M.scale), h: r2((c.maxy - c.miny + 1) / M.scale),
   });
   const found = [];
-  const seeds = [];
   for (const c of comps) {
     const b = px2pt(c);
-    if (b.h < 4) { seeds.push(b); continue; }                      // sesame seeds are tiny
+    // a gm/ml label's digits reach ~7.4pt at most; every marker is at least 8
+    if (b.h < MARKER_MIN_H) continue;
     const holes = holeCount(M.mask, M.w, M.h, c);
-    let type = null;
-    if (b.h >= 9) type = holes >= 5 ? 'gluten' : 'dairy';
-    else if (b.h >= 5.5) type = holes <= 1 ? 'jain' : 'gluten';
-    if (type) found.push({ type, ...b });
-  }
-  if (seeds.length >= 6) {
-    const bx0 = Math.min(...seeds.map((s) => s.x)), bx1 = Math.max(...seeds.map((s) => s.x + s.w));
-    const by0 = Math.min(...seeds.map((s) => s.y)), by1 = Math.max(...seeds.map((s) => s.y + s.h));
-    found.push({ type: 'sesame', x: r2(bx0), y: r2(by0), w: r2(bx1 - bx0), h: r2(by1 - by0) });
+    found.push({ type: holes >= 5 ? 'gluten' : (b.w >= 5 ? 'jain' : 'dairy'), ...b });
   }
   return found.sort((a, b) => a.x - b.x);
 }
@@ -253,27 +297,34 @@ async function build({ outDir = OUT_DIR, src = SRC } = {}) {
     pageInfo.push({ pi: P.pi, P, mainId, mainRef, stream: mainText, labels, size: P.page.getSize() });
   }
 
+  // ---- marker icons, found in the stream ----
+  const inventory = {};
+  for (const PI of pageInfo) inventory[PI.pi] = iconInventory(PI.stream);
+
   // ---- marker icon templates ----
+  // dairy and jain are real outlines, so their stamp is lifted straight out of the artwork.
+  // gluten is drawn as an image XObject and has no outline to lift — it is traced off the
+  // printed page instead, from an instance located above rather than a hard-coded region, so
+  // the trace follows the artwork if the designer moves it.
   const icons = {};
-  const p0stream = pageInfo[0].stream;
-  const vectorBlocks = [];
-  for (const [a, b] of topLevelBlocks(p0stream)) {
-    const bb = bboxOf(p0stream.slice(a, b));
-    if (!bb) continue;
-    const w = bb.w / 10, h = bb.h / 10;
-    if (w < 4 || w > 7 || h < 6 || h > 12) continue;
-    vectorBlocks.push({ a, b, x: r2(bb.x / 10), y: r2(bb.y / 10), w: r2(w), h: r2(h), kind: h > 9 ? 'dairy' : 'jain' });
-  }
   for (const kind of ['dairy', 'jain']) {
-    const src2 = vectorBlocks.find((v) => v.kind === kind);
-    const t = templateFromBlock(p0stream.slice(src2.a, src2.b));
+    const inst = pageInfo.flatMap((PI) => inventory[PI.pi].filter((i) => i.type === kind)
+      .map((i) => ({ ...i, stream: PI.stream })))[0];
+    if (!inst) throw new Error(`no ${kind} icon found in the artwork — retune iconInventory()`);
+    const t = templateFromBlock(inst.stream.slice(inst.span[0], inst.span[1]));
+    if (!t) throw new Error(`could not read the ${kind} outline out of its block`);
     icons[kind] = { body: t.body, w: t.w, h: t.h, source: 'vector' };
   }
   {
-    const g = await traceIcon(src, TRACE_REGIONS.gluten, { tolPt: 0.008 });
+    const g0 = pageInfo.flatMap((PI) => inventory[PI.pi].filter((i) => i.type === 'gluten')
+      .map((i) => ({ ...i, page: PI.pi })))[0];
+    if (!g0) throw new Error('no gluten icon found in the artwork — retune iconInventory()');
+    const pad = 0.4;
+    const g = await traceIcon(src, {
+      page: g0.page, x0: g0.x - pad, yTop: g0.y + g0.h + pad, x1: g0.x + g0.w + pad, yBot: g0.y - pad, dpi: 2400,
+    }, { tolPt: 0.008 });
+    if (!g) throw new Error('gluten trace found no contours');
     icons.gluten = { body: g.body, w: g.w, h: g.h, source: 'traced' };
-    const s = await traceIcon(src, TRACE_REGIONS.sesame, { tolPt: 0.008 });
-    icons.sesame = { body: s.body, w: r2(s.w * LEGEND_TO_INLINE), h: r2(s.h * LEGEND_TO_INLINE), scale: LEGEND_TO_INLINE, source: 'traced' };
   }
 
   // ---- fields ----
@@ -407,35 +458,24 @@ async function build({ outDir = OUT_DIR, src = SRC } = {}) {
   // ---- markers, per dish ----
   const nameFields = fields.filter((f) => f.role === 'name');
   for (const n of nameFields) {
-    const PI = pageInfo[n.page];
     const price = fields.find((f) => f.of === n.id && f.role === 'price');
     const gram = fields.find((f) => f.of === n.id && f.role === 'gram');
     // page 0 sets the gm label before the markers, page 1 after them, so scan the whole strip
     // between the name and the price and drop anything sitting inside the label's own box.
     const from = n.right + 1.0;
     const to = price ? price.x - 1.5 : from + 70;
+    n.marker_geom = { from: r2(from), to: r2(to), base_y: n.y };
     if (to - from < 3) { n.markers = []; n.marker_boxes = []; continue; }
     const gbox = gram ? gram.bbox : null;
-    const found = (await detectMarkers(src, n.page, from, to, n.y))
-      .filter((m) => !(gbox && m.x + m.w > gbox[0] - 0.5 && m.x < gbox[2] + 0.5));
-    // a vector marker can be deleted by span; a raster one has to be painted over
+    // Every marker in this artwork is drawn in the stream, so the inventory gives an exact span
+    // and box per icon. detectMarkers() still reads the same strip off the printed page — that
+    // is what the tests audit exports through, and the two agreeing is checked below.
+    const found = inventory[n.page]
+      .filter((m) => m.x >= from - 1 && m.x + m.w <= to + 1 && Math.abs(m.y - n.y) < 6)
+      .filter((m) => !(gbox && m.x + m.w > gbox[0] - 0.5 && m.x < gbox[2] + 0.5))
+      .sort((a, b) => a.x - b.x);
     n.markers = found.map((m) => m.type);
-    n.marker_geom = { from: r2(from), to: r2(to), base_y: n.y };
-    n.marker_boxes = found.map((m) => {
-      const vec = vectorSpanFor(PI, m, n.page);
-      return vec ? { type: m.type, x: m.x, y: m.y, w: m.w, h: m.h, span: vec } : { type: m.type, x: m.x, y: m.y, w: m.w, h: m.h, patch: true };
-    });
-  }
-
-  function vectorSpanFor(PI, m) {
-    for (const [a, b] of topLevelBlocks(PI.stream)) {
-      const bb = bboxOf(PI.stream.slice(a, b));
-      if (!bb) continue;
-      const x = bb.x / 10, y = bb.y / 10, w = bb.w / 10, h = bb.h / 10;
-      if (w > 12 || h > 14) continue;
-      if (Math.abs(x - m.x) < 1.2 && Math.abs(y - m.y) < 1.6) return [a, b];
-    }
-    return null;
+    n.marker_boxes = found.map((m) => ({ type: m.type, x: m.x, y: m.y, w: m.w, h: m.h, span: m.span }));
   }
 
   // ---- section assignment: the nearest band above whose rule spans this dish's column ----
@@ -447,12 +487,24 @@ async function build({ outDir = OUT_DIR, src = SRC } = {}) {
       if (b.page !== n.page) continue;
       const d = b.y - n.y;
       if (d < 0) continue;
-      // MAINS' rule starts a little right of its first column, so allow a small overhang
-      if (n.x < b.x0 - 15 || n.x > b.x1) continue;
+      // a rule starts a little right of the column it introduces, so allow a small overhang
+      if (!b.spans.some((s) => n.x >= s[0] - 15 && n.x <= s[1])) continue;
       if (d < bestD) { bestD = d; best = b; }
     }
     n.section = best ? best.label : 'MENU';
   }
+
+  // Standing copy set in the display face reads exactly like a dish name — page 2's "Proudly
+  // Vegetarian. Entirely Delicious." is the case here. What separates it from a real dish is
+  // that it sits under no section rule AND carries no price; every dish on this menu has both.
+  const strays = nameFields.filter((n) => n.section === 'MENU' && !fields.some((f) => f.of === n.id && f.role === 'price'));
+  for (const s of strays) {
+    console.warn(`  skipped (no section, no price): ${JSON.stringify(s.display)} p${s.page} x=${s.x} y=${s.y}`);
+    const drop = new Set([s.id, ...fields.filter((f) => f.of === s.id).map((f) => f.id)]);
+    for (let i = fields.length - 1; i >= 0; i--) if (drop.has(fields[i].id)) fields.splice(i, 1);
+    nameFields.splice(nameFields.indexOf(s), 1);
+  }
+
   sections.length = 0;
   sections.push(...bands);
 
@@ -472,8 +524,21 @@ async function build({ outDir = OUT_DIR, src = SRC } = {}) {
     const ds = nameFields.flatMap((n) => (n.marker_boxes || []).filter((m) => m.type === t).map((m) => m.y - n.y));
     if (ds.length) { ds.sort((a, b) => a - b); marker_dy[t] = r2(ds[ds.length >> 1]); }
   }
-  // sesame never appears beside a dish, only in the legend: centre it like gluten
-  if (marker_dy.sesame === undefined) marker_dy.sesame = r2((marker_dy.gluten ?? -2) + (icons.gluten.h - icons.sesame.h) / 20);
+
+  // ---- how much air the designer left around an icon, measured from the artwork ----
+  // The engine spends this twice: once before the first icon and once between each pair. It was
+  // a hard-coded 4.6 for the previous artwork, which set every re-stamped cluster ~2pt per gap
+  // wider than the baked ones beside it — visible at print zoom, so measure it instead.
+  const gaps = [];
+  for (const n of nameFields) {
+    const boxes = n.marker_boxes || [];
+    for (let i = 1; i < boxes.length; i++) gaps.push(boxes[i].x - (boxes[i - 1].x + boxes[i - 1].w));
+    const gram = fields.find((f) => f.of === n.id && f.role === 'gram');
+    // the outlier here is a dish whose label does not butt up against its icons at all
+    if (boxes.length && gram && gram.bbox && gram.bbox[2] < boxes[0].x) gaps.push(boxes[0].x - gram.bbox[2]);
+  }
+  gaps.sort((a, b) => a - b);
+  const marker_gap = gaps.length ? r2(gaps[gaps.length >> 1]) : 2.4;
 
   // ---- columns: the reflow unit. Removing a dish rides everything below it in the SAME
   // column up by that dish's slot height, exactly as the other brands' editors do.
@@ -491,18 +556,25 @@ async function build({ outDir = OUT_DIR, src = SRC } = {}) {
     c.ids.forEach((id, i) => {
       const me = byId[id];
       const next = i + 1 < c.ids.length ? byId[c.ids[i + 1]] : null;
-      // the last dish in a column has no neighbour to measure against: fall back to the column's
-      // typical pitch so removing it still frees a sensible amount of space for an added one
       me.slot = next ? r2(me.y - next.y) : null;
     });
-    const longest = Math.max(0, ...c.ids.map((id) => {
-      const d = fields.find((f) => f.of === id && f.role === 'desc');
-      return d ? Math.max(...d.lines.map((L) => L.runs ? 0 : 0), 0) : 0;
-    }));
-    void longest;
     const pitches = c.ids.map((id) => byId[id].slot).filter((v) => v);
     c.pitch = pitches.length ? r2(pitches.reduce((a, b) => a + b, 0) / pitches.length) : 50;
-    for (const id of c.ids) if (!byId[id].slot) byId[id].slot = c.pitch;
+    // The last dish in a column has no neighbour to measure against, and the column's average
+    // pitch alone is not enough: a dish whose own description runs longer than the column's
+    // average (Sourdough Naan sets three lines where BREADS averages two) would have an added
+    // dish land on top of its last line. Give it whichever is larger — the average, or its own
+    // printed height plus the tightest name-to-last-line clearance the designer used here.
+    const lastLineY = (id) => {
+      const d = fields.find((f) => f.of === id && f.role === 'desc');
+      return d && d.lines.length ? Math.min(...d.lines.map((L) => L.y)) : byId[id].y;
+    };
+    const clears = c.ids.slice(0, -1).map((id, i) => lastLineY(id) - byId[c.ids[i + 1]].y).filter((v) => v > 0);
+    const clear = clears.length ? Math.min(...clears) : 17;
+    for (const id of c.ids) {
+      if (byId[id].slot) continue;
+      byId[id].slot = r2(Math.max(c.pitch, byId[id].y - lastLineY(id) + clear));
+    }
     c.bottom = r2(byId[c.ids[c.ids.length - 1]].y);
   }
   // how wide text may run in each column: up to the next column of the same band, else to the
@@ -512,7 +584,10 @@ async function build({ outDir = OUT_DIR, src = SRC } = {}) {
     const right = columns
       .filter((o) => o.page === c.page && o.section === c.section && o.x > c.x + 20)
       .reduce((m, o) => Math.min(m, o.x), Infinity);
-    const edge = right !== Infinity ? right - 12 : (band ? band.x1 : 560);
+    // the band's rule may be broken over several columns; this column runs to the end of the
+    // segment it actually sits under, not to the whole band's right edge
+    const seg = band && band.spans.find((s) => c.x >= s[0] - 15 && c.x <= s[1]);
+    const edge = right !== Infinity ? right - 12 : (seg ? seg[1] : (band ? band.x1 : 560));
     const baked = Math.max(0, ...c.ids.map((id) => {
       const d = fields.find((f) => f.of === id && f.role === 'desc');
       if (!d) return 0;
@@ -547,7 +622,7 @@ async function build({ outDir = OUT_DIR, src = SRC } = {}) {
     icons,
     marker_order: MARKERS,
     marker_dy,
-    marker_gap: 4.6,
+    marker_gap,
     brand_k: BRAND_K,
     sections,
     columns,
@@ -586,10 +661,9 @@ if (require.main === module) {
     for (const n of names) {
       const kids = fm.fields.filter((f) => f.of === n.id);
       const d = kids.find((k) => k.role === 'desc'), p = kids.find((k) => k.role === 'price'), g = kids.find((k) => k.role === 'gram');
-      const mk = (n.marker_boxes || []).map((m) => m.type + (m.span ? '' : '*')).join(',');
+      const mk = (n.marker_boxes || []).map((m) => m.type).join(',');
       console.log(`  p${n.page} ${n.section.padEnd(7)} ${JSON.stringify(n.display).padEnd(26)} gm=${(g ? g.display : '-').padEnd(7)}` +
         ` ${(p ? p.display : '-').padEnd(4)} mk=[${mk.padEnd(22)}] desc(${d ? d.lines.length : 0})=${JSON.stringify(d ? d.display.slice(0, 46) : '')}`);
     }
-    console.log('(* = baked into the page raster, removed by patching rather than deleting)');
   }).catch((e) => { console.error(e); process.exit(1); });
 }

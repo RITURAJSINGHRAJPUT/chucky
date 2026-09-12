@@ -163,8 +163,10 @@ already in the repo are enough to *edit* today):
 - **Beshak:** `npm run beshak:build` — rebuilds `beshak.pdf` + `fieldmap.json` from
   `incoming/Beshak_DineIn_Menu.pdf` AND regenerates `index.html` from `src/beshak/{engine,ui}.js`.
   Beshak's artwork is shaped unlike the others (all editable bytes live in Form XObjects, text is
-  Identity-H 2-byte CIDs, and page 2's dairy/gluten/sesame icons are baked into a raster) — read
-  `docs/knowledge/beshak-editor.md` BEFORE touching it.
+  Identity-H 2-byte CIDs, and the gluten marker is an image with no outline to lift) — read
+  `docs/knowledge/beshak-editor.md` BEFORE touching it. The builder reads the artwork rather than
+  assuming last year's: the Sep 2026 drop moved sections between pages, gave MAINS a third column
+  and dropped the sesame marker, and it rebuilt without hard-coded coordinates.
 - **Drinks:** the Python pipeline in `src/capdrinks/` — see `docs/knowledge/capiche-drinks-editors.md`.
 - Design source files (PDF/.ai) come from the **design team**; they're not in this repo. The latest
   food blueprint is in `incoming/`.

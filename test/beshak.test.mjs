@@ -106,7 +106,7 @@ await (async function main() {
     const names = FM.fields.filter((f) => f.role === 'name');
     const withPrice = names.filter((n) => kid(n.id, 'price')).length;
     const withGram = names.filter((n) => kid(n.id, 'gram')).length;
-    return [names.length === 26 && withPrice === 26 && withGram === 26,
+    return [names.length === 30 && withPrice === 30 && withGram === 30,
       `${names.length} dishes, ${withPrice} priced, ${withGram} sized`];
   });
 
@@ -168,23 +168,27 @@ await (async function main() {
   });
 
   // ---------------------------------------------------------------- markers
-  const markerP0 = run('mk_p0.pdf', {}, { MARKERS: JSON.stringify({ [palak.id]: ['dairy', 'gluten', 'sesame'] }) });
-  await guard('page 1 markers: vector jain removed, gluten + sesame added', async () => {
+  // Palak is baked dairy+jain, so this drops jain, keeps dairy and adds gluten -- gluten being
+  // the interesting one, since its stamp is traced off the page rather than lifted as an outline.
+  const markerP0 = run('mk_p0.pdf', {}, { MARKERS: JSON.stringify({ [palak.id]: ['dairy', 'gluten'] }) });
+  await guard('page 1 markers: baked jain removed, traced gluten added', async () => {
     const { types } = await markersOn(markerP0, palak);
-    return [types.slice().sort().join(',') === 'dairy,gluten,sesame', `got [${types}]`];
+    return [types.slice().sort().join(',') === 'dairy,gluten', `got [${types}]`];
   });
 
   const naan = dish('Sourdough Naan');
-  const markerP1 = run('mk_p1.pdf', {}, { MARKERS: JSON.stringify({ [naan.id]: ['jain'] }) });
-  await guard('page 2 markers: the raster-baked dairy and gluten are patched out', async () => {
-    const { types } = await markersOn(markerP1, naan);
+  // a page 2 dish, so removal is exercised against the other stream too
+  const tukda = dish('Shahi Tukda');
+  const markerP1 = run('mk_p1.pdf', {}, { MARKERS: JSON.stringify({ [tukda.id]: ['jain'] }) });
+  await guard('page 2 markers: the other two are removed, jain left alone', async () => {
+    const { types } = await markersOn(markerP1, tukda);
     return [types.join(',') === 'jain', `got [${types}]`];
   });
 
-  const markerAdd = run('mk_add.pdf', {}, { MARKERS: JSON.stringify({ [naan.id]: ['dairy', 'gluten', 'sesame', 'jain'] }) });
-  await guard('page 2 markers: all four can be set at once', async () => {
+  const markerAdd = run('mk_add.pdf', {}, { MARKERS: JSON.stringify({ [naan.id]: ['dairy', 'gluten', 'jain'] }) });
+  await guard('markers: all three the menu uses can be set at once', async () => {
     const { types } = await markersOn(markerAdd, naan);
-    return [types.slice().sort().join(',') === 'dairy,gluten,jain,sesame', `got [${types}]`];
+    return [types.slice().sort().join(',') === 'dairy,gluten,jain', `got [${types}]`];
   });
 
   // ---------------------------------------------------------------- remove + reflow
