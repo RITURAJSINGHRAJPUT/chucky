@@ -474,7 +474,8 @@ const EDITORS = [
                                 ['/bugs/ dashboard neutralises hostile records', 'test/bugsdash.test.mjs'],
                                 ['capiche: ADD-ONS block fully editable', 'test/capiche.addons.mjs'],
                                 ['cross-promo QRs + capiche FSSAI licence line', 'test/crosspromo.mjs'],
-                                ['publish API allowlist + payload clamps', 'test/menustate.test.mjs']]) {
+                                ['publish API allowlist + payload clamps', 'test/menustate.test.mjs'],
+                                ['QR codes: resize / move / remove / add / change link, all editors', 'test/qrtool.test.mjs']]) {
     await guard(name, async () => {
       try { const o = run(script, []); const m = /(\d+) passed, (\d+) failed/.exec(o);
             return [m && m[2] === '0', m ? `${m[1]} passed, ${m[2]} failed` : 'no summary line']; }
@@ -482,6 +483,12 @@ const EDITORS = [
                   return [false, m ? `${m[1]} passed, ${m[2]} failed` : String(e.message).slice(0, 90)]; }
     });
   }
+
+  // the QR tool is copied into every editor from ONE source; a stale copy is a failure
+  await guard('QR tool: every editor carries the current copy (npm run qr:inject)', async () => {
+    try { run('src/shared/qrtool/build.mjs', ['--check']); return [true, 'all 7 up to date']; }
+    catch (e) { return [false, String(e.stderr || e.stdout || e.message).trim().split(/\r?\n/).pop().slice(0, 120)]; }
+  });
 
   // ---- 13. Beshak ------------------------------------------------------------------------------
   // Beshak keeps its editable bytes inside Form XObjects rather than page content streams, so its
