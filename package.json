@@ -19,7 +19,10 @@
     "test:bugapi": "node test/bugapi.test.mjs",
     "test:menustate": "node test/menustate.test.mjs",
     "beshak:build": "node src/beshak/build_beshak.js && node src/beshak/build_editor.js",
-    "test:beshak": "node test/beshak.test.mjs"
+    "test:beshak": "node test/beshak.test.mjs",
+    "qr:bake": "node src/shared/qr_bake.mjs --write",
+    "qr:inject": "node src/shared/qrtool/build.mjs",
+    "test:qr": "node test/qrtool.test.mjs"
   },
   "dependencies": {
     "@netlify/blobs": "^8.1.0",

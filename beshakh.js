@@ -81,6 +81,7 @@ function sandbox() {
     + 'regenerate, buildEditor, boot, wrapText, textWidth, markerSlots, fieldIssues, addedIssues, memSnapshot, memApply,'
     + 'pvBoxes, pvSync, pvJump, byId, kidsOf,'
     + 'get doc(){return document;},'
+    + 'get QRK(){return typeof QRK!=="undefined"?QRK:null;},'
     + 'ready:()=>!!(typeof FM!=="undefined" && FM && Object.keys(PRISTINE).length)};';
   vm.runInContext(engine + expose, ctx);
   return ctx.__h;

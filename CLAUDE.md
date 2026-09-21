@@ -17,6 +17,10 @@ Indian, plus drinks menus for Aiko and Capiche). Restaurant staff open an editor
 prices / allergen markers / photos, and **export a print-ready PDF that is the real designed menu
 with surgical edits** — not an HTML re-creation.
 
+Every editor also has a **QR tool** on its live preview: click any QR to resize / move / change
+its link / remove it, or **+ QR** to add one (see `docs/knowledge/qr-codes.md`). Artwork QRs are
+Form XObjects (baked by `npm run qr:bake`), so this never touches the byte-addressed page streams.
+
 Every editor also has a **Publish** button (next to Export): unlike Export, which downloads a PDF
 for the person clicking it, Publish pushes the current edit-state to a small server-side store
 (`/api/menu-state/:editor`) so *any device* that opens that editor afterward loads the last-published
@@ -167,6 +171,8 @@ already in the repo are enough to *edit* today):
   `docs/knowledge/beshak-editor.md` BEFORE touching it. The builder reads the artwork rather than
   assuming last year's: the Sep 2026 drop moved sections between pages, gave MAINS a third column
   and dropped the sesame marker, and it rebuilt without hard-coded coordinates.
+- **After ANY base-PDF rebuild:** re-run `npm run qr:bake` so the artwork's QRs become editable
+  again (and add a job in `src/shared/qr_bake.mjs` for any new QR in the design).
 - **Drinks:** the Python pipeline in `src/capdrinks/` — see `docs/knowledge/capiche-drinks-editors.md`.
 - Design source files (PDF/.ai) come from the **design team**; they're not in this repo. The latest
   food blueprint is in `incoming/`.
@@ -225,10 +231,13 @@ src/
   beshak/                # Beshak: normaliser, font-subset merger, icon tracer, builder, engine, UI
   capdrinks/*.py         # DRINKS build pipeline (Python + pikepdf) + RobotoMono-SemiBold.ttf
   drinks/  shared/       # Aiko-drinks builder/harnesses; shared memory.js + report.js
+  shared/qrtool/         # QR tool: ONE source, injected into all 7 editors (npm run qr:inject)
+  shared/qr_bake.mjs     # makes artwork QRs editable (Form XObjects, length-preserving)
 foodh.js markerh.js framh.js foodh_ar.js churndh.js beshakh.js   # test harnesses
 test/bugapi.test.mjs     # drift-guard: Worker/Netlify/Vercel bug-API clamps must agree (3-way)
 test/menustate.test.mjs  # Publish API: allowlist, gating, payload clamps
 test/beshak.test.mjs     # Beshak: byte identity, markers, reflow, add/remove, charset gate
+test/qrtool.test.mjs     # QR tool: every editor, render + decode audited
 docs/knowledge/          # detailed engineering notes (READ when touching a tricky area)
 backups/                 # timestamped safety copies   incoming/  # latest raw blueprint PDF
 ```

@@ -23,9 +23,10 @@ const curText = (f) => (edits[f.id] !== undefined ? edits[f.id] : f.display);
 const memBaseVer = () => 'v' + (pdfBytesOrig ? pdfBytesOrig.length : 0);
 
 function memSnapshot() {
-  return { edits: JSON.parse(JSON.stringify(edits)), removed: removed.slice(), added: JSON.parse(JSON.stringify(added)), markerEdits: JSON.parse(JSON.stringify(markerEdits)) };
+  return { qr: QRK.snap(), edits: JSON.parse(JSON.stringify(edits)), removed: removed.slice(), added: JSON.parse(JSON.stringify(added)), markerEdits: JSON.parse(JSON.stringify(markerEdits)) };
 }
 function memApply(s) {
+  QRK.load(s && s.qr);
   for (const k of Object.keys(edits)) delete edits[k];
   Object.assign(edits, s.edits || {});
   removed = s.removed || [];
@@ -347,6 +348,1025 @@ function schedulePreview() {
   previewTimer = setTimeout(() => { renderPreview().catch(() => {}); }, 260);
 }
 
+/* QRTOOL:BEGIN — generated from src/shared/qrtool/qrtool.src.js by `npm run qr:inject`. Edit there, not here. */
+/* ============ QR CODES — click one on the preview to resize / move / change link / remove; "+ QR" adds one ============
+   Same tool, same interface in every editor. It never touches the page streams the byte engine owns:
+   - A QR already in the artwork was baked (src/shared/qr_bake.mjs) into a Form XObject tagged /ChuckyQR.
+     Resizing / moving it rewrites that Form's /Matrix; removing it zeroes its /BBox. Untouched => the
+     Form's own pristine objects go back, so an unedited menu still exports byte-identical.
+   - An ADDED QR is drawn in a separate overlay stream: the page's /Contents becomes
+     [ "q", <the engine's own stream(s)>, "Q", overlay ] — the q/Q isolates whatever state the artwork
+     leaves behind, and the engine keeps assigning its stream by ref exactly as before.
+   Editor glue (4 lines each): QRK.apply(doc) just before doc.save(); QRK.hits(hitlayer, page, W, H) at the
+   end of pvSync(); qr:QRK.snap() / QRK.load(st.qr) in memSnapshot/memApply; QRK.init({refresh}) at boot. */
+const QRK = (() => {
+  // ---- encoder: src/shared/qr/gf.mjs + encode.mjs, inlined verbatim by the build ----
+  // --- src/shared/qr/gf.mjs
+  // GF(256) arithmetic and Reed-Solomon codes exactly as QR codes use them.
+  // Field: GF(2^8) with primitive polynomial 0x11D (x^8 + x^4 + x^3 + x^2 + 1).
+  // Generator element: alpha = 2. RS generator roots: alpha^0 .. alpha^(ecCount-1).
+  // Dependency-free ES module (Node 18+).
+
+  // ---------------------------------------------------------------------------
+  // Lookup tables
+  // ---------------------------------------------------------------------------
+
+  // EXP has 512 entries so gfMul can index EXP[LOG[a] + LOG[b]] without a modulo.
+  const EXP = new Uint8Array(512);
+  const LOG = new Uint8Array(256);
+
+  {
+    let x = 1;
+    for (let i = 0; i < 255; i++) {
+      EXP[i] = x;
+      LOG[x] = i;
+      x <<= 1;
+      if (x & 0x100) x ^= 0x11d;
+    }
+    for (let i = 255; i < 512; i++) EXP[i] = EXP[i - 255];
+  }
+
+  // ---------------------------------------------------------------------------
+  // Scalar field ops
+  // ---------------------------------------------------------------------------
+
+  function gfMul(a, b) {
+    if (a === 0 || b === 0) return 0;
+    return EXP[LOG[a] + LOG[b]];
+  }
+
+  function gfDiv(a, b) {
+    if (b === 0) throw new Error('division by zero in GF(256)');
+    if (a === 0) return 0;
+    return EXP[(LOG[a] - LOG[b] + 255) % 255];
+  }
+
+  // ---------------------------------------------------------------------------
+  // Encoding
+  // ---------------------------------------------------------------------------
+
+  // Generator polynomial prod_{i=0}^{ecCount-1} (x - alpha^i).
+  // Returned as a Uint8Array of coefficients, HIGHEST degree first
+  // (leading coefficient is always 1).
+  function rsGeneratorPoly(ecCount) {
+    let g = new Uint8Array([1]);
+    for (let i = 0; i < ecCount; i++) {
+      const next = new Uint8Array(g.length + 1);
+      const a = EXP[i]; // alpha^i
+      for (let j = 0; j < g.length; j++) {
+        next[j] ^= g[j]; // x * g(x)
+        next[j + 1] ^= gfMul(g[j], a); // alpha^i * g(x)
+      }
+      g = next;
+    }
+    return g;
+  }
+
+  // EC codewords: the remainder of data(x) * x^ecCount divided by the generator.
+  function rsEncode(data, ecCount) {
+    const gen = rsGeneratorPoly(ecCount);
+    const buf = new Uint8Array(data.length + ecCount);
+    buf.set(data);
+    for (let i = 0; i < data.length; i++) {
+      const coef = buf[i];
+      if (coef === 0) continue;
+      for (let j = 1; j < gen.length; j++) {
+        buf[i + j] ^= gfMul(gen[j], coef);
+      }
+      buf[i] = 0; // gen[0] === 1, quotient term eliminated
+    }
+    return buf.slice(data.length);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Decoding helpers (decoder-internal polynomials are plain Arrays,
+  // LOWEST degree first)
+  // ---------------------------------------------------------------------------
+
+  // Evaluate a highest-degree-first byte polynomial (a codeword) at x (Horner).
+  function polyEvalHigh(msg, x) {
+    let y = msg[0];
+    for (let i = 1; i < msg.length; i++) y = gfMul(y, x) ^ msg[i];
+    return y;
+  }
+
+  // Evaluate a lowest-degree-first polynomial at x.
+  function polyEvalLow(p, x) {
+    let y = 0;
+    let xp = 1;
+    for (let i = 0; i < p.length; i++) {
+      y ^= gfMul(p[i], xp);
+      xp = gfMul(xp, x);
+    }
+    return y;
+  }
+
+  function polyMulLow(a, b) {
+    const out = new Array(a.length + b.length - 1).fill(0);
+    for (let i = 0; i < a.length; i++) {
+      if (a[i] === 0) continue;
+      for (let j = 0; j < b.length; j++) out[i + j] ^= gfMul(a[i], b[j]);
+    }
+    return out;
+  }
+
+  function trim(p) {
+    while (p.length > 1 && p[p.length - 1] === 0) p.pop();
+    return p;
+  }
+
+  // out = a(x) + c * x^shift * b(x)   (lowest-first)
+  function xorScaledShift(a, b, c, shift) {
+    const out = a.slice();
+    while (out.length < b.length + shift) out.push(0);
+    for (let i = 0; i < b.length; i++) out[i + shift] ^= gfMul(c, b[i]);
+    return trim(out);
+  }
+
+  function calcSyndromes(cw, ecCount) {
+    const synd = new Array(ecCount);
+    let allZero = true;
+    for (let j = 0; j < ecCount; j++) {
+      const s = polyEvalHigh(cw, EXP[j]);
+      synd[j] = s;
+      if (s !== 0) allZero = false;
+    }
+    return { synd, allZero };
+  }
+
+  // Errors-and-erasures Berlekamp-Massey. gamma is the erasure locator
+  // (lowest-first, degree = numErasures); Lambda and B start from it, and the
+  // iteration begins after the first numErasures syndromes.
+  function berlekampMassey(synd, ecCount, gamma, numErasures) {
+    let Lambda = gamma.slice();
+    let B = gamma.slice();
+    let L = numErasures;
+    let m = 1;
+    let b = 1;
+    for (let r = numErasures; r < ecCount; r++) {
+      let delta = 0;
+      for (let i = 0; i < Lambda.length && i <= r; i++) {
+        delta ^= gfMul(Lambda[i], synd[r - i]);
+      }
+      if (delta === 0) {
+        m++;
+        continue;
+      }
+      if (2 * L <= r + numErasures) {
+        const T = Lambda.slice();
+        Lambda = xorScaledShift(Lambda, B, gfDiv(delta, b), m);
+        L = r + 1 - L + numErasures;
+        B = T;
+        b = delta;
+        m = 1;
+      } else {
+        Lambda = xorScaledShift(Lambda, B, gfDiv(delta, b), m);
+        m++;
+      }
+    }
+    return trim(Lambda);
+  }
+
+  // Chien search: return the position values p (powers of x, i.e. p = n-1-index)
+  // where Lambda(alpha^{-p}) === 0, or null if the root count does not match
+  // the locator degree.
+  function findErrataPositions(Lambda, n) {
+    const degree = Lambda.length - 1;
+    const positions = [];
+    for (let p = 0; p < n; p++) {
+      const xinv = EXP[(255 - (p % 255)) % 255]; // alpha^{-p}
+      if (polyEvalLow(Lambda, xinv) === 0) positions.push(p);
+    }
+    return positions.length === degree ? positions : null;
+  }
+
+  // Omega(x) = S(x) * Lambda(x) mod x^ecCount   (lowest-first)
+  function computeOmega(synd, Lambda, ecCount) {
+    const out = new Array(ecCount).fill(0);
+    for (let i = 0; i < Lambda.length; i++) {
+      if (Lambda[i] === 0) continue;
+      for (let j = 0; j < synd.length && i + j < ecCount; j++) {
+        out[i + j] ^= gfMul(Lambda[i], synd[j]);
+      }
+    }
+    return trim(out);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Decoding
+  // ---------------------------------------------------------------------------
+
+  // codewords: Uint8Array of data followed by ec (length n = k + ecCount).
+  // erasures: array of known-bad positions, as indices into `codewords`.
+  // Returns { data: Uint8Array (corrected data part), corrected: number }.
+  // Throws Error('unrecoverable') when correction fails; success is verified
+  // by recomputing all syndromes on the corrected codeword.
+  function rsDecode(codewords, ecCount, erasures = []) {
+    const n = codewords.length;
+    const dataLen = n - ecCount;
+    if (!Number.isInteger(ecCount) || ecCount <= 0 || dataLen < 0 || n > 255) {
+      throw new Error('unrecoverable');
+    }
+    const cw = Uint8Array.from(codewords);
+
+    const erasSet = [...new Set(erasures)];
+    for (const e of erasSet) {
+      if (!Number.isInteger(e) || e < 0 || e >= n) throw new Error('unrecoverable');
+    }
+    if (erasSet.length > ecCount) throw new Error('unrecoverable');
+
+    const first = calcSyndromes(cw, ecCount);
+    if (first.allZero) {
+      return { data: cw.slice(0, dataLen), corrected: 0 };
+    }
+    const synd = first.synd;
+
+    // Erasure locator Gamma(x) = prod (1 + X_j x), X_j = alpha^{n-1-index}.
+    let gamma = [1];
+    for (const e of erasSet) {
+      gamma = polyMulLow(gamma, [1, EXP[(n - 1 - e) % 255]]);
+    }
+
+    const Lambda = berlekampMassey(synd, ecCount, gamma, erasSet.length);
+    const degree = Lambda.length - 1;
+    // Capacity: 2*errors + erasures <= ecCount, errors = degree - erasures.
+    if (2 * degree - erasSet.length > ecCount) throw new Error('unrecoverable');
+
+    const positions = findErrataPositions(Lambda, n);
+    if (!positions) throw new Error('unrecoverable');
+
+    const omega = computeOmega(synd, Lambda, ecCount);
+
+    // Forney: e = X * Omega(X^{-1}) / Lambda'(X^{-1})   (roots at alpha^0..,
+    // i.e. b = 0, so the extra factor is X itself).
+    let corrected = 0;
+    for (const p of positions) {
+      const X = EXP[p % 255];
+      const Xinv = EXP[(255 - (p % 255)) % 255];
+      const Xinv2 = gfMul(Xinv, Xinv);
+      // Formal derivative: only odd-degree terms of Lambda survive.
+      let lp = 0;
+      let xpow = 1; // Xinv^(i-1) for i = 1, 3, 5, ...
+      for (let i = 1; i < Lambda.length; i += 2) {
+        lp ^= gfMul(Lambda[i], xpow);
+        xpow = gfMul(xpow, Xinv2);
+      }
+      if (lp === 0) throw new Error('unrecoverable');
+      const magnitude = gfMul(X, gfDiv(polyEvalLow(omega, Xinv), lp));
+      if (magnitude !== 0) {
+        cw[n - 1 - p] ^= magnitude;
+        corrected++;
+      }
+    }
+
+    const recheck = calcSyndromes(cw, ecCount);
+    if (!recheck.allZero) throw new Error('unrecoverable');
+
+    return { data: cw.slice(0, dataLen), corrected };
+  }
+
+  // --- src/shared/qr/encode.mjs
+  // encode.mjs — QR code matrix generator per ISO/IEC 18004.
+  // BYTE mode only, versions 1..10, EC levels L/M/Q/H. Dependency-free ES module.
+  //
+  //   qrEncode(payload, { ecLevel: 'M', version: null /* auto-min */, mask: null /* auto */ })
+  //     -> { version, ecLevel, mask, size, matrix: Uint8Array(size*size) /* row-major 0/1 */,
+  //          toString() /* '##'/'  ' ASCII art */ }
+  //
+  // Also exports the internals the test suite re-derives placement from:
+  //   buildCodewords(bytes, version, ecLevel)  — final interleaved data+EC codeword sequence
+  //   functionModules(version)                 — { size, base, isFunc } function-pattern plane
+  //   placementOrder(version)                  — [row, col] pairs in zigzag placement order
+  //   formatBits(ecLevel, mask), versionBits(version), MASKS, EC_PARAMS, TOTAL_CODEWORDS
+
+
+
+  // ---------------------------------------------------------------------------
+  // Capacity tables (ISO/IEC 18004 Table 9), versions 1..10.
+  // EC_PARAMS[level][version] = [ecPerBlock, g1Blocks, g1DataCW, g2Blocks, g2DataCW]
+  // ---------------------------------------------------------------------------
+
+  const TOTAL_CODEWORDS = [, 26, 44, 70, 100, 134, 172, 196, 242, 292, 346];
+
+  const EC_PARAMS = {
+    L: [, [7, 1, 19, 0, 0], [10, 1, 34, 0, 0], [15, 1, 55, 0, 0], [20, 1, 80, 0, 0],
+         [26, 1, 108, 0, 0], [18, 2, 68, 0, 0], [20, 2, 78, 0, 0], [24, 2, 97, 0, 0],
+         [30, 2, 116, 0, 0], [18, 2, 68, 2, 69]],
+    M: [, [10, 1, 16, 0, 0], [16, 1, 28, 0, 0], [26, 1, 44, 0, 0], [18, 2, 32, 0, 0],
+         [24, 2, 43, 0, 0], [16, 4, 27, 0, 0], [18, 4, 31, 0, 0], [22, 2, 38, 2, 39],
+         [22, 3, 36, 2, 37], [26, 4, 43, 1, 44]],
+    Q: [, [13, 1, 13, 0, 0], [22, 1, 22, 0, 0], [18, 2, 17, 0, 0], [26, 2, 24, 0, 0],
+         [18, 2, 15, 2, 16], [24, 4, 19, 0, 0], [18, 2, 14, 4, 15], [22, 4, 18, 2, 19],
+         [20, 4, 16, 4, 17], [24, 6, 19, 2, 20]],
+    H: [, [17, 1, 9, 0, 0], [28, 1, 16, 0, 0], [22, 2, 13, 0, 0], [16, 4, 9, 0, 0],
+         [22, 2, 11, 2, 12], [28, 4, 15, 0, 0], [26, 4, 13, 1, 14], [26, 4, 14, 2, 15],
+         [24, 4, 12, 4, 13], [28, 6, 15, 2, 16]],
+  };
+
+  // Module-load self-check: every row must account for the version's total codewords.
+  for (const lvl of Object.keys(EC_PARAMS)) {
+    for (let v = 1; v <= 10; v++) {
+      const [ec, g1, d1, g2, d2] = EC_PARAMS[lvl][v];
+      if (ec * (g1 + g2) + g1 * d1 + g2 * d2 !== TOTAL_CODEWORDS[v]) {
+        throw new Error(`EC_PARAMS inconsistent at ${v}-${lvl}`);
+      }
+    }
+  }
+
+  // Alignment pattern centre coordinates per version (Table E.1).
+  const ALIGN = [, [], [6, 18], [6, 22], [6, 26], [6, 30], [6, 34],
+                 [6, 22, 38], [6, 24, 42], [6, 26, 46], [6, 28, 50]];
+
+  // EC level indicator bits for the format information.
+  const EC_BITS = { L: 1, M: 0, Q: 3, H: 2 };
+
+  // The 8 data mask predicates (r = row, c = column); true = flip the module.
+  const MASKS = [
+    (r, c) => (r + c) % 2 === 0,
+    (r, c) => r % 2 === 0,
+    (r, c) => c % 3 === 0,
+    (r, c) => (r + c) % 3 === 0,
+    (r, c) => (Math.floor(r / 2) + Math.floor(c / 3)) % 2 === 0,
+    (r, c) => ((r * c) % 2) + ((r * c) % 3) === 0,
+    (r, c) => (((r * c) % 2) + ((r * c) % 3)) % 2 === 0,
+    (r, c) => (((r + c) % 2) + ((r * c) % 3)) % 2 === 0,
+  ];
+
+  // ---------------------------------------------------------------------------
+  // Format / version information (BCH-protected)
+  // ---------------------------------------------------------------------------
+
+  // 15-bit format info: 5 data bits (2 EC level + 3 mask) + BCH(15,5) remainder
+  // (generator 0x537), the whole thing XORed with 0x5412.
+  function formatBits(ecLevel, mask) {
+    const data = (EC_BITS[ecLevel] << 3) | mask;
+    let rem = data;
+    for (let i = 0; i < 10; i++) rem = (rem << 1) ^ ((rem >>> 9) * 0x537);
+    return ((data << 10) | rem) ^ 0x5412;
+  }
+
+  // 18-bit version info (v >= 7): 6 data bits + 12-bit BCH remainder (generator 0x1F25).
+  function versionBits(version) {
+    let rem = version;
+    for (let i = 0; i < 12; i++) rem = (rem << 1) ^ ((rem >>> 11) * 0x1F25);
+    return (version << 12) | rem;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Data encoding — BYTE mode bit stream, padding, block split, RS, interleave
+  // ---------------------------------------------------------------------------
+
+  function dataCapacityCodewords(version, ecLevel) {
+    const [, g1, d1, g2, d2] = EC_PARAMS[ecLevel][version];
+    return g1 * d1 + g2 * d2;
+  }
+
+  function charCountBits(version) {
+    return version <= 9 ? 8 : 16; // BYTE mode: 8 bits v1-9, 16 bits v10+
+  }
+
+  // Final interleaved codeword sequence (data blocks column-wise, then EC blocks
+  // column-wise) for a BYTE-mode payload.
+  function buildCodewords(bytes, version, ecLevel) {
+    const [ec, g1, d1, g2, d2] = EC_PARAMS[ecLevel][version];
+    const dataCW = g1 * d1 + g2 * d2;
+    const ccBits = charCountBits(version);
+
+    const bits = [];
+    const push = (val, n) => { for (let i = n - 1; i >= 0; i--) bits.push((val >>> i) & 1); };
+    push(0b0100, 4);              // mode indicator: BYTE
+    push(bytes.length, ccBits);   // character count
+    for (const b of bytes) push(b, 8);
+    if (bits.length > dataCW * 8) {
+      throw new Error(`payload (${bytes.length} bytes) does not fit version ${version}-${ecLevel}`);
+    }
+    push(0, Math.min(4, dataCW * 8 - bits.length)); // terminator (possibly shortened)
+    while (bits.length % 8 !== 0) bits.push(0);     // pad to codeword boundary
+
+    const data = [];
+    for (let i = 0; i < bits.length; i += 8) {
+      let b = 0;
+      for (let j = 0; j < 8; j++) b = (b << 1) | bits[i + j];
+      data.push(b);
+    }
+    for (let alt = 0; data.length < dataCW; alt ^= 1) data.push(alt ? 0x11 : 0xec);
+
+    // Split into blocks (group 1 then group 2), RS-encode each.
+    const blocks = [];
+    let off = 0;
+    for (let i = 0; i < g1; i++) { blocks.push(data.slice(off, off + d1)); off += d1; }
+    for (let i = 0; i < g2; i++) { blocks.push(data.slice(off, off + d2)); off += d2; }
+    const ecBlocks = blocks.map(b => rsEncode(Uint8Array.from(b), ec));
+
+    // Interleave: i-th data codeword of every block, then i-th EC codeword of every block.
+    const out = [];
+    const maxD = Math.max(d1, d2);
+    for (let i = 0; i < maxD; i++) for (const b of blocks) if (i < b.length) out.push(b[i]);
+    for (let i = 0; i < ec; i++) for (const b of ecBlocks) out.push(b[i]);
+    return Uint8Array.from(out);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Function patterns
+  // ---------------------------------------------------------------------------
+
+  // Build the function-pattern plane for a version: finders + separators, timing,
+  // alignment patterns, dark module, version info (v >= 7), and reservations for
+  // the format info (drawn per-mask later). Returns { size, base, isFunc }.
+  function functionModules(version) {
+    const size = 17 + 4 * version;
+    const base = new Uint8Array(size * size);
+    const isFunc = new Uint8Array(size * size);
+    const set = (r, c, v) => { base[r * size + c] = v ? 1 : 0; isFunc[r * size + c] = 1; };
+
+    // Timing patterns (row 6 and column 6): dark at even coordinates.
+    for (let i = 8; i < size - 8; i++) {
+      set(6, i, i % 2 === 0);
+      set(i, 6, i % 2 === 0);
+    }
+
+    // Finder patterns with their light separators (drawn as a 9x9 clipped block).
+    const finder = (fr, fc) => {
+      for (let dr = -1; dr <= 7; dr++) {
+        for (let dc = -1; dc <= 7; dc++) {
+          const r = fr + dr, c = fc + dc;
+          if (r < 0 || r >= size || c < 0 || c >= size) continue;
+          const ring = dr >= 0 && dr <= 6 && dc >= 0 && dc <= 6 &&
+                       (dr === 0 || dr === 6 || dc === 0 || dc === 6);
+          const core = dr >= 2 && dr <= 4 && dc >= 2 && dc <= 4;
+          set(r, c, ring || core);
+        }
+      }
+    };
+    finder(0, 0);
+    finder(0, size - 7);
+    finder(size - 7, 0);
+
+    // Alignment patterns: 5x5 at every centre pair except the three finder corners.
+    const centers = ALIGN[version];
+    const last = centers.length ? centers[centers.length - 1] : -1;
+    for (const cr of centers) {
+      for (const cc of centers) {
+        if ((cr === 6 && cc === 6) || (cr === 6 && cc === last) || (cr === last && cc === 6)) continue;
+        for (let dr = -2; dr <= 2; dr++) {
+          for (let dc = -2; dc <= 2; dc++) {
+            set(cr + dr, cc + dc, Math.max(Math.abs(dr), Math.abs(dc)) !== 1);
+          }
+        }
+      }
+    }
+
+    // Reserve the format info modules (both copies); actual bits depend on the mask.
+    for (let i = 0; i <= 8; i++) {
+      if (i === 6) continue; // timing modules keep their pattern
+      set(8, i, 0);
+      set(i, 8, 0);
+    }
+    for (let i = 0; i < 8; i++) {
+      set(8, size - 1 - i, 0);
+      set(size - 1 - i, 8, 0);
+    }
+
+    // Version information, v >= 7: 6x3 top-right and 3x6 bottom-left.
+    if (version >= 7) {
+      const vb = versionBits(version);
+      for (let i = 0; i < 18; i++) {
+        const bit = (vb >>> i) & 1;
+        const longC = size - 11 + (i % 3); // size-11 .. size-9
+        const shortC = Math.floor(i / 3);  // 0 .. 5
+        set(shortC, longC, bit); // top-right block
+        set(longC, shortC, bit); // bottom-left block
+      }
+    }
+
+    // Dark module — always dark, at (4*version + 9, 8) = (size-8, 8).
+    set(size - 8, 8, 1);
+
+    return { size, base, isFunc };
+  }
+
+  // Zigzag placement order over the non-function modules: column pairs from the
+  // right edge leftwards (skipping timing column 6), alternating up/down.
+  function orderFrom(size, isFunc) {
+    const order = [];
+    for (let right = size - 1; right >= 1; right -= 2) {
+      if (right === 6) right = 5;
+      const upward = ((right + 1) & 2) === 0;
+      for (let vert = 0; vert < size; vert++) {
+        const row = upward ? size - 1 - vert : vert;
+        for (let j = 0; j < 2; j++) {
+          const col = right - j;
+          if (!isFunc[row * size + col]) order.push([row, col]);
+        }
+      }
+    }
+    return order;
+  }
+
+  function placementOrder(version) {
+    const { size, isFunc } = functionModules(version);
+    return orderFrom(size, isFunc);
+  }
+
+  // Draw the 15 format bits into both of their homes. Bit i means (bits >>> i) & 1.
+  function drawFormat(m, size, bits) {
+    const b = i => (bits >>> i) & 1;
+    // Copy 1, around the top-left finder.
+    for (let i = 0; i <= 5; i++) m[i * size + 8] = b(i);
+    m[7 * size + 8] = b(6);
+    m[8 * size + 8] = b(7);
+    m[8 * size + 7] = b(8);
+    for (let i = 9; i <= 14; i++) m[8 * size + (14 - i)] = b(i);
+    // Copy 2, split under the top-right and beside the bottom-left finders.
+    for (let i = 0; i <= 7; i++) m[8 * size + (size - 1 - i)] = b(i);
+    for (let i = 8; i <= 14; i++) m[(size - 15 + i) * size + 8] = b(i);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Mask evaluation — the four penalty rules (N1=3, N2=3, N3=40, N4=10)
+  // ---------------------------------------------------------------------------
+
+  function penaltyScore(m, size) {
+    let score = 0;
+
+    // N1: runs of >= 5 same-coloured modules in a row/column: 3 + (len - 5).
+    for (let axis = 0; axis < 2; axis++) {
+      for (let a = 0; a < size; a++) {
+        let runVal = -1, runLen = 0;
+        for (let b = 0; b < size; b++) {
+          const v = axis === 0 ? m[a * size + b] : m[b * size + a];
+          if (v === runVal) runLen++;
+          else {
+            if (runLen >= 5) score += 3 + runLen - 5;
+            runVal = v;
+            runLen = 1;
+          }
+        }
+        if (runLen >= 5) score += 3 + runLen - 5;
+      }
+    }
+
+    // N2: every 2x2 block of a single colour: +3.
+    for (let r = 0; r < size - 1; r++) {
+      for (let c = 0; c < size - 1; c++) {
+        const v = m[r * size + c];
+        if (v === m[r * size + c + 1] && v === m[(r + 1) * size + c] && v === m[(r + 1) * size + c + 1]) {
+          score += 3;
+        }
+      }
+    }
+
+    // N3: finder-like pattern 1011101 with 0000 on either side, rows and columns: +40.
+    for (let axis = 0; axis < 2; axis++) {
+      for (let a = 0; a < size; a++) {
+        let w = 0;
+        for (let b = 0; b < size; b++) {
+          w = ((w << 1) | (axis === 0 ? m[a * size + b] : m[b * size + a])) & 0x7ff;
+          if (b >= 10 && (w === 0b10111010000 || w === 0b00001011101)) score += 40;
+        }
+      }
+    }
+
+    // N4: 10 points per 5% that the dark-module proportion deviates from 50%.
+    let dark = 0;
+    for (let i = 0; i < m.length; i++) dark += m[i];
+    score += Math.floor(Math.abs((dark * 100) / (size * size) - 50) / 5) * 10;
+
+    return score;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Main entry
+  // ---------------------------------------------------------------------------
+
+  function qrEncode(payload, { ecLevel = 'M', version = null, mask = null } = {}) {
+    if (!EC_PARAMS[ecLevel]) throw new Error(`unknown EC level ${JSON.stringify(ecLevel)}`);
+    if (mask !== null && (!Number.isInteger(mask) || mask < 0 || mask > 7)) {
+      throw new Error(`mask must be null or an integer 0..7, got ${mask}`);
+    }
+    const bytes = typeof payload === 'string'
+      ? new TextEncoder().encode(payload)
+      : Uint8Array.from(payload);
+
+    const fits = v => 4 + charCountBits(v) + 8 * bytes.length <= 8 * dataCapacityCodewords(v, ecLevel);
+    let v = version;
+    if (v == null) {
+      for (v = 1; v <= 10 && !fits(v); v++);
+      if (v > 10) throw new Error(`payload (${bytes.length} bytes) exceeds version 10-${ecLevel} capacity`);
+    } else {
+      if (!Number.isInteger(v) || v < 1 || v > 10) throw new Error(`version must be 1..10, got ${v}`);
+      if (!fits(v)) throw new Error(`payload (${bytes.length} bytes) does not fit version ${v}-${ecLevel}`);
+    }
+
+    const codewords = buildCodewords(bytes, v, ecLevel);
+    const { size, base, isFunc } = functionModules(v);
+    const order = orderFrom(size, isFunc);
+    const totalBits = codewords.length * 8;
+
+    const render = mk => {
+      const m = base.slice();
+      const maskFn = MASKS[mk];
+      for (let i = 0; i < order.length; i++) {
+        const [r, c] = order[i];
+        const bit = i < totalBits ? (codewords[i >> 3] >>> (7 - (i & 7))) & 1 : 0; // remainder bits are 0
+        m[r * size + c] = bit ^ (maskFn(r, c) ? 1 : 0);
+      }
+      drawFormat(m, size, formatBits(ecLevel, mk));
+      return m;
+    };
+
+    let chosenMask = mask;
+    let matrix;
+    if (mask === null) {
+      let best = Infinity;
+      for (let mk = 0; mk < 8; mk++) {
+        const m = render(mk);
+        const p = penaltyScore(m, size);
+        if (p < best) { best = p; chosenMask = mk; matrix = m; }
+      }
+    } else {
+      matrix = render(mask);
+    }
+
+    return {
+      version: v,
+      ecLevel,
+      mask: chosenMask,
+      size,
+      matrix,
+      toString() {
+        const rows = [];
+        for (let r = 0; r < size; r++) {
+          let line = '';
+          for (let c = 0; c < size; c++) line += matrix[r * size + c] ? '##' : '  ';
+          rows.push(line);
+        }
+        return rows.join('\n');
+      },
+    };
+  }
+
+
+  const MIN_S = 0.4, MAX_S = 3, STEP = 0.1;             // existing QRs: scale factor
+  const MIN_PT = 28, MAX_PT = 220, DEF_PT = 60;         // added QRs: code size in pt (1cm = 28.35pt)
+  const QUIET = 2;                                      // white modules round an added code
+  const SMALL_PT = 51;                                  // < 1.8cm: warn it may not scan from a table
+  let st = { base: {}, added: [] };                     // base[id] = {s,dx,dy,off}; added[] = {id,page,url,cx,cy,size}
+  let found = null;                                     // discovered per doc
+  let hooks = { refresh() {} };
+  let sel = null, stageRef = null, geo = null, timer = null;
+  const encCache = {};
+
+  const num = v => { const s = (+v).toFixed(3).replace(/0+$/, '').replace(/\.$/, ''); return s === '-0' ? '0' : s || '0'; };
+  const cm = pt => (pt * 2.54 / 72).toFixed(1) + ' cm';
+  const txt = o => o ? (o.decodeText ? o.decodeText() : String(o)) : '';
+  const neutral = s => !s || (!s.off && Math.abs((s.s == null ? 1 : s.s) - 1) < 1e-9 && !s.dx && !s.dy);
+
+  function encode(url) {
+    if (!encCache[url]) encCache[url] = qrEncode(url, { ecLevel: 'M' });
+    return encCache[url];
+  }
+
+  function discover(doc) {
+    const { PDFName, PDFDict, PDFArray } = PDFLib;
+    const list = [], pages = [];
+    doc.getPages().forEach((pg, p) => {
+      pages.push({ node: pg.node, orig: pg.node.get(PDFName.of('Contents')), refs: null });
+      let res = null; try { res = pg.node.Resources(); } catch (_) {}
+      const xo = res && res.lookupMaybe(PDFName.of('XObject'), PDFDict);
+      if (!xo) return;
+      for (const [, ref] of xo.entries()) {
+        const obj = doc.context.lookup(ref); const d = obj && obj.dict;
+        if (!d || !d.get(PDFName.of('ChuckyQR'))) continue;
+        const onPage = d.get(PDFName.of('ChuckyQRPage'));
+        if (onPage && onPage.asNumber && onPage.asNumber() !== p) continue;
+        const bb = d.lookup(PDFName.of('BBox'), PDFArray).asArray().map(n => n.asNumber());
+        list.push({ id: txt(d.get(PDFName.of('ChuckyQR'))), page: p, dict: d,
+                    label: txt(d.get(PDFName.of('ChuckyQRLabel'))) || 'QR code', url: txt(d.get(PDFName.of('ChuckyQRUrl'))),
+                    box: bb, bboxObj: d.get(PDFName.of('BBox')), matrixObj: d.get(PDFName.of('Matrix')) });
+      }
+    });
+    found = { doc, list, pages };
+  }
+
+  /* the one place geometry is decided: a QR's current box in PDF space (y up) */
+  function boxOf(q) {
+    if (q.url != null && q.cx != null) {                 // added
+      const h = q.size / 2; return { x0: q.cx - h, y0: q.cy - h, x1: q.cx + h, y1: q.cy + h };
+    }
+    const s = st.base[q.id] || {}, k = s.s == null ? 1 : s.s;
+    const [x0, y0, x1, y1] = q.box, cx = (x0 + x1) / 2 + (s.dx || 0), cy = (y0 + y1) / 2 + (s.dy || 0);
+    const hw = (x1 - x0) / 2 * k, hh = (y1 - y0) / 2 * k;
+    return { x0: cx - hw, y0: cy - hh, x1: cx + hw, y1: cy + hh };
+  }
+
+  function overlayOps(a) {
+    const { size: n, matrix } = encode(a.url), N = n + 2 * QUIET, m = a.size / n;
+    let o = `q\n1 0 0 1 ${num(a.cx - a.size / 2 - QUIET * m)} ${num(a.cy - a.size / 2 - QUIET * m)} cm\n${num(m)} 0 0 ${num(m)} 0 0 cm\n`;
+    o += `0 0 0 0 k\n0 0 ${N} ${N} re\nf\n0 0 0 1 k\n`;
+    for (let r = 0; r < n; r++) {
+      for (let c = 0; c < n;) {
+        if (!matrix[r * n + c]) { c++; continue; }
+        let e = c; while (e < n && matrix[r * n + e]) e++;
+        o += `${QUIET + c} ${QUIET + n - 1 - r} ${e - c} 1 re\n`; c = e;
+      }
+    }
+    return o + 'f\nQ\n';
+  }
+
+  /* called by the editor right before doc.save(): idempotent, derives everything from `st` */
+  function apply(doc) {
+    const { PDFName, PDFRawStream, PDFNumber } = PDFLib;
+    if (!found || found.doc !== doc) discover(doc);
+    for (const q of found.list) {
+      const s = st.base[q.id], d = q.dict;
+      if (neutral(s)) {                                   // put the artwork's own objects back
+        d.set(PDFName.of('BBox'), q.bboxObj);
+        if (q.matrixObj) d.set(PDFName.of('Matrix'), q.matrixObj); else d.delete(PDFName.of('Matrix'));
+      } else if (s.off) {
+        d.set(PDFName.of('BBox'), doc.context.obj([0, 0, 0, 0]));
+      } else {
+        const k = s.s == null ? 1 : s.s, [x0, y0, x1, y1] = q.box, cx = (x0 + x1) / 2, cy = (y0 + y1) / 2;
+        d.set(PDFName.of('BBox'), q.bboxObj);
+        d.set(PDFName.of('Matrix'), doc.context.obj([k, 0, 0, k, +num(cx * (1 - k) + (s.dx || 0)), +num(cy * (1 - k) + (s.dy || 0))]));
+      }
+    }
+    const raw = t => { const b = new Uint8Array(t.length); for (let i = 0; i < t.length; i++) b[i] = t.charCodeAt(i) & 255;
+                       return PDFRawStream.of(doc.context.obj({ Length: PDFNumber.of(b.length) }), b); };
+    // last page first, so clearing several pages' overlays unwinds the object count in order
+    for (let p = found.pages.length - 1; p >= 0; p--) {
+      const pi = found.pages[p];
+      const mine = st.added.filter(a => a.page === p);
+      if (!mine.length) {
+        if (!pi.refs) continue;
+        /* drop the overlay objects entirely: an orphan stream would still be written by save(), and
+           the object count in the trailer with it — clearing the last added QR must give back the
+           byte-identical export */
+        pi.node.set(PDFName.of('Contents'), pi.orig);
+        for (const r of [pi.refs.open, pi.refs.close, pi.refs.over]) doc.context.delete(r);
+        if (doc.context.largestObjectNumber === pi.refs.top) doc.context.largestObjectNumber = pi.refs.before;
+        pi.refs = null; continue;
+      }
+      if (!pi.refs) {
+        const before = doc.context.largestObjectNumber;
+        pi.refs = { before, open: doc.context.register(raw('q\n')), close: doc.context.register(raw('\nQ\n')), over: doc.context.register(raw('')) };
+        pi.refs.top = doc.context.largestObjectNumber;
+      }
+      doc.context.assign(pi.refs.over, raw(mine.map(overlayOps).join('')));
+      const inner = pi.orig && pi.orig.asArray ? pi.orig.asArray() : [pi.orig];
+      pi.node.set(PDFName.of('Contents'), doc.context.obj([pi.refs.open, ...inner, pi.refs.close, pi.refs.over]));
+    }
+  }
+
+  // ---------------- state API (also what the tests drive) ----------------
+  const bump = () => { clearTimeout(timer); timer = setTimeout(() => { try { hooks.refresh(); } catch (e) { console.error(e); } }, 140); };
+  const baseQ = id => found && found.list.find(q => q.id === id);
+  const addQ = id => st.added.find(a => a.id === id);
+  const bs = id => (st.base[id] = st.base[id] || { s: 1, dx: 0, dy: 0, off: false });
+  function list(page) {
+    const out = [];
+    if (found) for (const q of found.list) if (page == null || q.page === page)
+      out.push({ id: q.id, page: q.page, kind: 'artwork', label: q.label, url: q.url, off: !!(st.base[q.id] || {}).off, box: boxOf(q) });
+    for (const a of st.added) if (page == null || a.page === page)
+      out.push({ id: a.id, page: a.page, kind: 'added', label: 'QR code', url: a.url, off: false, box: boxOf(a) });
+    return out;
+  }
+  function sizeOf(id) { const a = addQ(id); if (a) return a.size; const q = baseQ(id); const b = q && boxOf(q); return b ? b.x1 - b.x0 : 0; }
+  function setSize(id, pt) {
+    const a = addQ(id); if (a) { a.size = Math.max(MIN_PT, Math.min(MAX_PT, pt)); return; }
+    const q = baseQ(id); if (!q) return; const s = bs(id);
+    s.s = Math.max(MIN_S, Math.min(MAX_S, pt / (q.box[2] - q.box[0])));
+  }
+  function grow(id, dir) {                               // one click of - / +
+    const a = addQ(id);
+    if (a) setSize(id, a.size + dir * 5.67);             // 2mm a click
+    else { const s = bs(id); s.s = Math.round(Math.max(MIN_S, Math.min(MAX_S, (s.s || 1) + dir * STEP)) * 100) / 100; }
+  }
+  function move(id, dx, dy) { const a = addQ(id); if (a) { a.cx += dx; a.cy += dy; return; } const s = bs(id); s.dx = (s.dx || 0) + dx; s.dy = (s.dy || 0) + dy; }
+  function remove(id) { if (addQ(id)) st.added = st.added.filter(a => a.id !== id); else if (baseQ(id)) bs(id).off = true; }
+  function restore(id) { if (st.base[id]) st.base[id].off = false; }
+  function reset(id) { if (baseQ(id)) delete st.base[id]; }
+  function checkUrl(url) {
+    url = String(url || '').trim();
+    if (!url) return { err: 'Paste the link the QR should open.' };
+    try { encode(url); } catch (_) { return { err: 'That link is too long for a QR code (max ~210 characters).' }; }
+    return { url };
+  }
+  function add(o) {
+    const c = checkUrl(o.url); if (c.err) throw new Error(c.err);
+    const a = { id: 'qa' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5), page: o.page | 0, url: c.url,
+                cx: +o.cx, cy: +o.cy, size: Math.max(MIN_PT, Math.min(MAX_PT, +o.size || DEF_PT)) };
+    st.added.push(a); return a.id;
+  }
+  /* a new link for an existing QR = hide the artwork's one, draw a fresh code in its place at its size */
+  function setLink(id, url) {
+    const c = checkUrl(url); if (c.err) throw new Error(c.err);
+    const a = addQ(id); if (a) { a.url = c.url; return id; }
+    const q = baseQ(id); if (!q) return id;
+    const b = boxOf(q); bs(id).off = true;
+    return add({ page: q.page, url: c.url, cx: (b.x0 + b.x1) / 2, cy: (b.y0 + b.y1) / 2, size: b.x1 - b.x0 });
+  }
+  const snap = () => JSON.parse(JSON.stringify(st));
+  function load(o) {
+    st = { base: {}, added: [] };
+    if (o && typeof o === 'object') {
+      for (const [k, v] of Object.entries(o.base || {})) if (v && typeof v === 'object')
+        st.base[k] = { s: +v.s || 1, dx: +v.dx || 0, dy: +v.dy || 0, off: !!v.off };
+      for (const a of (Array.isArray(o.added) ? o.added : [])) {
+        if (!a || checkUrl(a.url).err) continue;
+        st.added.push({ id: String(a.id || ('qa' + st.added.length)), page: a.page | 0, url: String(a.url).trim(), cx: +a.cx || 0, cy: +a.cy || 0,
+                        size: Math.max(MIN_PT, Math.min(MAX_PT, +a.size || DEF_PT)) });
+      }
+    }
+    sel = null; closePanel();
+  }
+  function init(h) { hooks = Object.assign({ refresh() {} }, h || {}); }
+
+  // ---------------- UI ----------------
+  const CSS = `
+.qrk-box{position:absolute;pointer-events:auto;cursor:grab;border-radius:3px;box-shadow:inset 0 0 0 1.5px rgba(40,120,255,.0);transition:box-shadow .12s,background .12s;z-index:3;touch-action:none}
+.qrk-box:hover,.qrk-box.sel{box-shadow:inset 0 0 0 2px #2f7cf6,0 0 0 3px rgba(47,124,246,.18);background:rgba(47,124,246,.06)}
+.qrk-box.drag{cursor:grabbing}
+.qrk-box.off{box-shadow:inset 0 0 0 1.5px rgba(120,120,120,.8);background:repeating-linear-gradient(45deg,rgba(0,0,0,.05) 0 6px,transparent 6px 12px)}
+.qrk-box .qrk-tag{position:absolute;left:0;top:-17px;font:600 10px/14px system-ui,sans-serif;background:#2f7cf6;color:#fff;padding:0 5px;border-radius:3px;white-space:nowrap;opacity:0;transition:opacity .12s;pointer-events:none}
+.qrk-box:hover .qrk-tag,.qrk-box.sel .qrk-tag,.qrk-box.off .qrk-tag{opacity:1}
+.qrk-box.off .qrk-tag{background:#777}
+.qrk-add{position:absolute;right:8px;top:8px;z-index:4;font:600 12px/1 system-ui,sans-serif;padding:7px 10px;border-radius:8px;border:1px solid rgba(0,0,0,.15);background:#fff;color:#1b1b1b;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.12)}
+.qrk-add:hover{background:#f1f5ff;border-color:#2f7cf6}
+.qrk-panel{position:fixed;z-index:9999;width:292px;background:#fff;color:#1b1b1b;border-radius:12px;box-shadow:0 12px 40px rgba(0,0,0,.28);padding:12px 14px 14px;font:13px/1.35 system-ui,sans-serif}
+.qrk-panel .qrk-h{display:flex;align-items:center;gap:8px;margin-bottom:10px}
+.qrk-panel .qrk-h b{font-size:14px}
+.qrk-panel .qrk-x{margin-left:auto;border:0;background:none;font-size:20px;line-height:1;cursor:pointer;color:#666;padding:0 2px}
+.qrk-panel .qrk-sub{color:#666;font-size:11.5px;word-break:break-all;margin:-6px 0 10px}
+.qrk-panel .qrk-row{display:flex;align-items:center;gap:6px;margin:8px 0}
+.qrk-panel .qrk-row>span:first-child{width:38px;color:#555;font-size:12px}
+.qrk-panel button.qb{min-width:30px;height:30px;border-radius:8px;border:1px solid #d5d5d5;background:#f7f7f7;cursor:pointer;font:600 15px/1 system-ui,sans-serif;color:#1b1b1b}
+.qrk-panel button.qb:hover{border-color:#2f7cf6;background:#f1f5ff}
+.qrk-panel input[type=range]{flex:1;min-width:0}
+.qrk-panel .qrk-val{width:48px;text-align:right;font-variant-numeric:tabular-nums;font-size:12px}
+.qrk-panel .qrk-acts{display:flex;flex-wrap:wrap;gap:6px;margin-top:12px}
+.qrk-panel .qrk-acts button{flex:1;height:32px;border-radius:8px;border:1px solid #d5d5d5;background:#f7f7f7;cursor:pointer;font:600 12px system-ui,sans-serif;color:#1b1b1b;white-space:nowrap}
+.qrk-panel .qrk-acts button:hover{border-color:#2f7cf6;background:#f1f5ff}
+.qrk-panel .qrk-acts button.danger{color:#c62828}
+.qrk-panel .qrk-acts button.primary{background:#2f7cf6;border-color:#2f7cf6;color:#fff}
+.qrk-panel input[type=url]{width:100%;box-sizing:border-box;height:34px;border-radius:8px;border:1px solid #cfcfcf;padding:0 10px;font:13px system-ui,sans-serif}
+.qrk-panel .qrk-warn{margin-top:8px;font-size:11.5px;color:#a35c00}
+.qrk-panel .qrk-err{margin-top:6px;font-size:12px;color:#c62828}
+.qrk-panel .qrk-hint{font-size:11px;color:#888}`;
+  function css() { if (document.getElementById('qrk-css')) return; const s = document.createElement('style'); s.id = 'qrk-css'; s.textContent = CSS; document.head.appendChild(s); }
+  const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+  /* boxes over every QR on the page + the "+ QR" button; called at the end of the editor's pvSync() */
+  function hits(hl, page, W, H) {
+    if (!hl || typeof document === 'undefined') return;
+    css();
+    geo = { hl, page, W, H };
+    const stage = hl.parentNode;
+    if (stage && !stage.querySelector('.qrk-add')) {
+      if (getComputedStyle(stage).position === 'static') stage.style.position = 'relative';
+      const b = document.createElement('button'); b.className = 'qrk-add'; b.type = 'button';
+      b.textContent = '+ QR'; b.title = 'Add a QR code to this page';
+      b.addEventListener('click', e => { e.stopPropagation(); openAdd(b); });
+      stage.appendChild(b);
+    }
+    stageRef = stage;
+    hl.querySelectorAll('.qrk-box').forEach(n => n.remove());
+    for (const q of list(page)) {
+      const d = document.createElement('div');
+      d.className = 'qrk-box' + (q.off ? ' off' : '') + (sel === q.id ? ' sel' : '');
+      place(d, q.box);
+      d.dataset.qr = q.id;
+      d.title = q.off ? 'Removed QR — click to restore' : 'Click to resize, move, change link or remove · drag to move';
+      d.innerHTML = `<span class="qrk-tag">${q.off ? 'QR removed' : '▣ ' + esc(q.label)}</span>`;
+      drag(d, q.id);
+      hl.appendChild(d);
+    }
+  }
+  function place(d, b) {
+    const { W, H } = geo;
+    d.style.left = (b.x0 / W * 100) + '%'; d.style.width = ((b.x1 - b.x0) / W * 100) + '%';
+    d.style.top = ((H - b.y1) / H * 100) + '%'; d.style.height = ((b.y1 - b.y0) / H * 100) + '%';
+  }
+  /* drag to move (page-space delta from the stage's on-screen size); a click without travel opens the panel */
+  function drag(d, id) {
+    d.addEventListener('pointerdown', e => {
+      if (e.button !== 0) return;
+      e.preventDefault(); e.stopPropagation();
+      const r = geo.hl.getBoundingClientRect(), kx = geo.W / r.width, ky = geo.H / r.height;
+      const x0 = e.clientX, y0 = e.clientY, L = parseFloat(d.style.left), T = parseFloat(d.style.top);
+      let moved = false;
+      try { d.setPointerCapture(e.pointerId); } catch (_) {}
+      const mv = ev => {
+        const dx = ev.clientX - x0, dy = ev.clientY - y0;
+        if (!moved && Math.hypot(dx, dy) < 4) return;
+        moved = true; d.classList.add('drag');
+        d.style.left = (L + dx / r.width * 100) + '%'; d.style.top = (T + dy / r.height * 100) + '%';
+      };
+      const up = ev => {
+        d.removeEventListener('pointermove', mv); d.removeEventListener('pointerup', up); d.removeEventListener('pointercancel', up);
+        d.classList.remove('drag');
+        if (!moved) { openEdit(id, d); return; }
+        move(id, (ev.clientX - x0) * kx, -(ev.clientY - y0) * ky);
+        sel = id; bump(); if (panel && panel.dataset.id === id) openEdit(id, d);
+      };
+      d.addEventListener('pointermove', mv); d.addEventListener('pointerup', up); d.addEventListener('pointercancel', up);
+    });
+    d.addEventListener('click', e => e.stopPropagation());
+  }
+
+  let panel = null;
+  function closePanel() { if (panel) { panel.remove(); panel = null; } if (typeof document !== 'undefined') document.removeEventListener('pointerdown', outside, true); }
+  function outside(e) { if (panel && !panel.contains(e.target) && !(e.target.closest && e.target.closest('.qrk-box,.qrk-add'))) { sel = null; closePanel(); resync(); } }
+  function resync() { if (geo) hits(geo.hl, geo.page, geo.W, geo.H); }
+  function shell(anchor, html) {
+    closePanel(); css();
+    panel = document.createElement('div'); panel.className = 'qrk-panel'; panel.innerHTML = html;
+    document.body.appendChild(panel);
+    const a = anchor.getBoundingClientRect(), pw = panel.offsetWidth || 292, ph = panel.offsetHeight || 260;
+    let left = a.right + 10, top = a.top;
+    if (left + pw > innerWidth - 8) left = a.left - pw - 10;
+    if (left < 8) left = Math.max(8, Math.min(innerWidth - pw - 8, a.left));
+    if (top + ph > innerHeight - 8) top = innerHeight - ph - 8;
+    panel.style.left = Math.max(8, left) + 'px'; panel.style.top = Math.max(8, top) + 'px';
+    panel.querySelector('.qrk-x').onclick = () => { sel = null; closePanel(); resync(); };
+    setTimeout(() => document.addEventListener('pointerdown', outside, true), 0);
+    return panel;
+  }
+  function openEdit(id, anchor) {
+    const q = list().find(x => x.id === id); if (!q) return;
+    sel = id; resync();
+    const isAdd = q.kind === 'added';
+    const lo = isAdd ? MIN_PT : Math.round(MIN_S * (baseQ(id).box[2] - baseQ(id).box[0])), hi = isAdd ? MAX_PT : Math.round(MAX_S * (baseQ(id).box[2] - baseQ(id).box[0]));
+    const p = shell(anchor, `
+      <div class="qrk-h"><b>QR code</b><button class="qrk-x" title="Close">×</button></div>
+      <div class="qrk-sub">${esc(q.label)}${q.url ? ' · ' + esc(q.url) : ''}</div>
+      ${q.off ? `<div class="qrk-row">This QR is removed from the menu.</div>
+      <div class="qrk-acts"><button class="primary" data-a="restore">Restore it</button><button data-a="link">New link…</button></div>` : `
+      <div class="qrk-row"><span>Size</span><button class="qb" data-a="minus" title="Smaller">−</button>
+        <input type="range" min="${lo}" max="${hi}" step="1" value="${Math.round(sizeOf(id))}">
+        <button class="qb" data-a="plus" title="Bigger">+</button><span class="qrk-val"></span></div>
+      <div class="qrk-row"><span>Move</span><button class="qb" data-a="L" title="Left">←</button><button class="qb" data-a="U" title="Up">↑</button>
+        <button class="qb" data-a="D" title="Down">↓</button><button class="qb" data-a="R" title="Right">→</button><span class="qrk-hint">or drag it</span></div>
+      <div class="qrk-warn" hidden></div>
+      <div class="qrk-acts"><button data-a="link">Change link…</button>${isAdd ? '' : '<button data-a="reset">Reset</button>'}<button class="danger" data-a="remove">Remove</button></div>`}
+      <div class="qrk-linkbox" hidden><div class="qrk-row"><input type="url" placeholder="https://…" value="${esc(q.url || '')}"></div>
+        <div class="qrk-err" hidden></div><div class="qrk-acts"><button class="primary" data-a="setlink">Use this link</button></div></div>`);
+    p.dataset.id = id;
+    const val = p.querySelector('.qrk-val'), rng = p.querySelector('input[type=range]'), warn = p.querySelector('.qrk-warn');
+    const show = () => {
+      const s = sizeOf(id); if (val) val.textContent = cm(s); if (rng) rng.value = Math.round(s);
+      if (warn) { warn.hidden = s >= SMALL_PT; warn.textContent = 'Small QR codes can be hard to scan — keep it at least 1.8 cm.'; }
+      const q2 = list().find(x => x.id === id), box = q2 && geo && geo.hl.querySelector(`.qrk-box[data-qr="${id}"]`);
+      if (box) place(box, q2.box);
+    };
+    show();
+    if (rng) rng.addEventListener('input', () => { setSize(id, +rng.value); show(); bump(); });
+    const nudge = 1.4175;                                  // 0.5 mm
+    p.addEventListener('click', e => {
+      const a = e.target.closest('[data-a]'); if (!a) return;
+      const act = a.dataset.a;
+      if (act === 'minus' || act === 'plus') { grow(id, act === 'plus' ? 1 : -1); show(); bump(); }
+      else if ('LRUD'.includes(act)) { move(id, act === 'L' ? -nudge : act === 'R' ? nudge : 0, act === 'U' ? nudge : act === 'D' ? -nudge : 0); show(); bump(); }
+      else if (act === 'remove') { remove(id); sel = null; closePanel(); resync(); bump(); }
+      else if (act === 'restore') { restore(id); openEdit(id, anchor); bump(); }
+      else if (act === 'reset') { reset(id); show(); bump(); }
+      else if (act === 'link') { p.querySelector('.qrk-linkbox').hidden = false; const i = p.querySelector('input[type=url]'); i.focus(); i.select(); }
+      else if (act === 'setlink') {
+        const i = p.querySelector('input[type=url]'), er = p.querySelector('.qrk-err');
+        try { const nid = setLink(id, i.value); sel = nid; closePanel(); resync(); bump(); }
+        catch (x) { er.hidden = false; er.textContent = x.message; }
+      }
+    });
+    const inp = p.querySelector('input[type=url]');
+    inp.addEventListener('keydown', e => { if (e.key === 'Enter') p.querySelector('[data-a=setlink]').click(); });
+  }
+  function openAdd(anchor) {
+    if (!geo) return;
+    sel = null; resync();
+    const p = shell(anchor, `
+      <div class="qrk-h"><b>Add a QR code</b><button class="qrk-x" title="Close">×</button></div>
+      <div class="qrk-row"><input type="url" placeholder="Paste the link, e.g. https://instagram.com/…"></div>
+      <div class="qrk-err" hidden></div>
+      <div class="qrk-hint">It appears in the middle of this page — then drag it where you want it and set its size.</div>
+      <div class="qrk-acts"><button class="primary" data-a="go">Add QR</button></div>`);
+    const i = p.querySelector('input'), er = p.querySelector('.qrk-err');
+    const go = () => {
+      try {
+        const id = add({ page: geo.page, url: i.value, cx: geo.W / 2, cy: geo.H / 2, size: DEF_PT });
+        sel = id; closePanel(); resync(); bump();
+        const box = geo.hl.querySelector(`.qrk-box[data-qr="${id}"]`); if (box) openEdit(id, box);
+      } catch (x) { er.hidden = false; er.textContent = x.message; }
+    };
+    p.querySelector('[data-a=go]').onclick = go;
+    i.addEventListener('keydown', e => { if (e.key === 'Enter') go(); });
+    setTimeout(() => i.focus(), 0);
+  }
+
+  return { apply, hits, init, snap, load, list, add, remove, restore, reset, setSize, grow, move, setLink, sizeOf, encode };
+})();
+/* QRTOOL:END */
+QRK.init({ refresh: () => schedulePreview() });
+
 // ============================================================ click the preview to edit
 /* Invisible boxes are laid over the rendered page, positioned in PERCENT of the page so they stay
    aligned at any preview scale / window size. Clicking one scrolls to that dish's card and focuses
@@ -482,6 +1502,7 @@ function pvSync() {
     d.addEventListener('click', () => pvJump(b.id));
     hl.appendChild(d);
   }
+  try { QRK.hits(hl, activePage, W, H); } catch (e) { console.error(e); }
 }
 
 function pvJump(id) {

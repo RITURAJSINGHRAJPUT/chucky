@@ -250,6 +250,7 @@ async function regenerate() {
     if (tail[sid]) text = text + '\n' + tail[sid];
     setStream(sid, text);
   }
+  if (typeof QRK !== 'undefined') QRK.apply(pdfDoc);   // QR codes: resize/move/remove/add (src/shared/qrtool)
   return pdfDoc.save({ useObjectStreams: false });
 }
 
